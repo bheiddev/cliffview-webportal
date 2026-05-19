@@ -6,6 +6,13 @@ import {
   listTeeTimes,
   updateTeeTime,
 } from '../services/teeTimesService.ts'
+import {
+  FUTURE_DATETIME_MESSAGE,
+  isFutureDateTime,
+  isFutureTeeTime,
+  localDateString,
+  minTimeForDate,
+} from '../utils/datetime.ts'
 import { formatDate, formatTime, money, toTimeInputValue } from '../utils/format.ts'
 
 type TeeTimesPageProps = {
@@ -82,6 +89,12 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
     setSaving(true)
     setFormError(null)
 
+    if (!isFutureDateTime(form.date, form.time)) {
+      setFormError(FUTURE_DATETIME_MESSAGE)
+      setSaving(false)
+      return
+    }
+
     const payload: TeeTimeInsert = {
       ...form,
       description: form.description?.trim() || null,
@@ -95,12 +108,14 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
       return
     }
 
-    setTeeTimes((prev) =>
-      [...prev, result.data].sort(
-        (a, b) =>
-          a.date.localeCompare(b.date) || a.time.localeCompare(b.time),
-      ),
-    )
+    if (isFutureTeeTime(result.data)) {
+      setTeeTimes((prev) =>
+        [...prev, result.data].sort(
+          (a, b) =>
+            a.date.localeCompare(b.date) || a.time.localeCompare(b.time),
+        ),
+      )
+    }
     setForm(defaultForm())
     setShowCreate(false)
   }
@@ -119,6 +134,12 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
 
   async function saveEdit(id: string) {
     if (!editDraft) return
+
+    if (!isFutureDateTime(editDraft.date, editDraft.time)) {
+      setRowError(FUTURE_DATETIME_MESSAGE)
+      return
+    }
+
     setBusyId(id)
     setRowError(null)
 
@@ -143,6 +164,7 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
     setTeeTimes((prev) =>
       prev
         .map((r) => (r.id === id ? result.data : r))
+        .filter(isFutureTeeTime)
         .sort(
           (a, b) =>
             a.date.localeCompare(b.date) || a.time.localeCompare(b.time),
@@ -201,6 +223,7 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
               <input
                 type="date"
                 required
+                min={localDateString()}
                 value={form.date}
                 onChange={(e) => setForm({ ...form, date: e.target.value })}
               />
@@ -210,6 +233,7 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
               <input
                 type="time"
                 required
+                min={minTimeForDate(form.date)}
                 value={form.time}
                 onChange={(e) => setForm({ ...form, time: e.target.value })}
               />
@@ -327,7 +351,7 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
           </p>
         ) : null}
         {!loading && !error && teeTimes.length === 0 ? (
-          <p className="portal-empty">No tee times yet.</p>
+          <p className="portal-empty">No upcoming tee times.</p>
         ) : null}
         {teeTimes.length > 0 ? (
           <div className="portal-table-wrap">
@@ -358,6 +382,7 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                           <input
                             type="date"
                             className="inline-input"
+                            min={localDateString()}
                             value={editDraft.date}
                             onChange={(e) =>
                               setEditDraft({
@@ -371,6 +396,7 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                           <input
                             type="time"
                             className="inline-input"
+                            min={minTimeForDate(editDraft.date)}
                             value={editDraft.time}
                             onChange={(e) =>
                               setEditDraft({

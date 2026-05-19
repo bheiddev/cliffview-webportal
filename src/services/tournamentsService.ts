@@ -4,6 +4,11 @@ import {
   type TournamentRow,
   type TournamentUpdate,
 } from './supabaseClient.ts'
+import {
+  FUTURE_DATETIME_MESSAGE,
+  isFutureDateTime,
+  isFutureTournament,
+} from '../utils/datetime.ts'
 
 export type CreateTournamentResult =
   | { data: TournamentRow; error: null }
@@ -17,7 +22,7 @@ export type ListTournamentsResult =
   | { data: TournamentRow[]; error: null }
   | { data: null; error: Error }
 
-/** Loads all tournaments, ordered by date then start time. */
+/** Loads upcoming tournaments (date/time in the future), ordered by date then start time. */
 export async function listTournaments(): Promise<ListTournamentsResult> {
   try {
     const supabase = getSupabaseClient()
@@ -30,7 +35,10 @@ export async function listTournaments(): Promise<ListTournamentsResult> {
     if (error) {
       return { data: null, error: new Error(error.message) }
     }
-    return { data: data ?? [], error: null }
+    return {
+      data: (data ?? []).filter(isFutureTournament),
+      error: null,
+    }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     return { data: null, error: new Error(message) }
@@ -43,6 +51,10 @@ export async function listTournaments(): Promise<ListTournamentsResult> {
 export async function createTournament(
   input: TournamentInsert,
 ): Promise<CreateTournamentResult> {
+  if (!isFutureDateTime(input.date, input.start_time)) {
+    return { data: null, error: new Error(FUTURE_DATETIME_MESSAGE) }
+  }
+
   const supabase = getSupabaseClient()
   const { data, error } = await supabase
     .from('tournaments')
@@ -63,6 +75,14 @@ export async function updateTournament(
   id: string,
   patch: TournamentUpdate,
 ): Promise<UpdateTournamentResult> {
+  if (
+    patch.date !== undefined &&
+    patch.start_time !== undefined &&
+    !isFutureDateTime(patch.date, patch.start_time)
+  ) {
+    return { data: null, error: new Error(FUTURE_DATETIME_MESSAGE) }
+  }
+
   const supabase = getSupabaseClient()
   const { data, error } = await supabase
     .from('tournaments')

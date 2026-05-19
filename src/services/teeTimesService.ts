@@ -4,6 +4,11 @@ import {
   type TeeTimeRow,
   type TeeTimeUpdate,
 } from './supabaseClient.ts'
+import {
+  FUTURE_DATETIME_MESSAGE,
+  isFutureDateTime,
+  isFutureTeeTime,
+} from '../utils/datetime.ts'
 
 export type CreateTeeTimeResult =
   | { data: TeeTimeRow; error: null }
@@ -21,7 +26,7 @@ export type ListTeeTimesResult =
   | { data: TeeTimeRow[]; error: null }
   | { data: null; error: Error }
 
-/** Loads all tee times, ordered by date then time. */
+/** Loads upcoming tee times (date/time in the future), ordered by date then time. */
 export async function listTeeTimes(): Promise<ListTeeTimesResult> {
   try {
     const supabase = getSupabaseClient()
@@ -34,7 +39,10 @@ export async function listTeeTimes(): Promise<ListTeeTimesResult> {
     if (error) {
       return { data: null, error: new Error(error.message) }
     }
-    return { data: data ?? [], error: null }
+    return {
+      data: (data ?? []).filter(isFutureTeeTime),
+      error: null,
+    }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     return { data: null, error: new Error(message) }
@@ -47,6 +55,10 @@ export async function listTeeTimes(): Promise<ListTeeTimesResult> {
 export async function createTeeTime(
   input: TeeTimeInsert,
 ): Promise<CreateTeeTimeResult> {
+  if (!isFutureDateTime(input.date, input.time)) {
+    return { data: null, error: new Error(FUTURE_DATETIME_MESSAGE) }
+  }
+
   const supabase = getSupabaseClient()
   const { data, error } = await supabase
     .from('tee_times')
@@ -67,6 +79,14 @@ export async function updateTeeTime(
   id: string,
   patch: TeeTimeUpdate,
 ): Promise<UpdateTeeTimeResult> {
+  if (
+    patch.date !== undefined &&
+    patch.time !== undefined &&
+    !isFutureDateTime(patch.date, patch.time)
+  ) {
+    return { data: null, error: new Error(FUTURE_DATETIME_MESSAGE) }
+  }
+
   const supabase = getSupabaseClient()
   const { data, error } = await supabase
     .from('tee_times')

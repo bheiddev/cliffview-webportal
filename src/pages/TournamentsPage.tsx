@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import type { TournamentInsert, TournamentRow } from '../services/supabaseClient.ts'
 import { createTournament, listTournaments } from '../services/tournamentsService.ts'
+import {
+  FUTURE_DATETIME_MESSAGE,
+  isFutureDateTime,
+  isFutureTournament,
+  localDateString,
+  minTimeForDate,
+} from '../utils/datetime.ts'
 import { formatDate, formatTime, money } from '../utils/format.ts'
 
 type TournamentsPageProps = {
@@ -52,6 +59,12 @@ export function TournamentsPage({ onBack }: TournamentsPageProps) {
     setSaving(true)
     setFormError(null)
 
+    if (!isFutureDateTime(form.date, form.start_time)) {
+      setFormError(FUTURE_DATETIME_MESSAGE)
+      setSaving(false)
+      return
+    }
+
     const payload: TournamentInsert = {
       ...form,
       format: form.format?.trim() || null,
@@ -65,13 +78,15 @@ export function TournamentsPage({ onBack }: TournamentsPageProps) {
       return
     }
 
-    setTournaments((prev) =>
-      [...prev, result.data].sort(
-        (a, b) =>
-          a.date.localeCompare(b.date) ||
-          a.start_time.localeCompare(b.start_time),
-      ),
-    )
+    if (isFutureTournament(result.data)) {
+      setTournaments((prev) =>
+        [...prev, result.data].sort(
+          (a, b) =>
+            a.date.localeCompare(b.date) ||
+            a.start_time.localeCompare(b.start_time),
+        ),
+      )
+    }
     setForm(defaultForm())
     setShowCreate(false)
   }
@@ -116,6 +131,7 @@ export function TournamentsPage({ onBack }: TournamentsPageProps) {
               <input
                 type="date"
                 required
+                min={localDateString()}
                 value={form.date}
                 onChange={(e) => setForm({ ...form, date: e.target.value })}
               />
@@ -125,6 +141,7 @@ export function TournamentsPage({ onBack }: TournamentsPageProps) {
               <input
                 type="time"
                 required
+                min={minTimeForDate(form.date)}
                 value={form.start_time}
                 onChange={(e) =>
                   setForm({ ...form, start_time: e.target.value })
@@ -259,7 +276,7 @@ export function TournamentsPage({ onBack }: TournamentsPageProps) {
           </p>
         ) : null}
         {!loading && !error && tournaments.length === 0 ? (
-          <p className="portal-empty">No tournaments yet.</p>
+          <p className="portal-empty">No upcoming tournaments.</p>
         ) : null}
         {tournaments.length > 0 ? (
           <div className="portal-table-wrap">
