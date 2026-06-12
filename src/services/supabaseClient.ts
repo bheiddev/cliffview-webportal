@@ -12,7 +12,7 @@ export type TeeTimeRow = {
   is_available: boolean
   created_at: string
   updated_at: string
-  holes: 9 | 18
+  holes: 9 | 18 | null
 }
 
 export type TeeTimeInsert = {
@@ -23,7 +23,7 @@ export type TeeTimeInsert = {
   spots_remaining: number
   description?: string | null
   is_available?: boolean
-  holes?: 9 | 18
+  holes?: 9 | 18 | null
 }
 
 export type TeeTimeUpdate = Partial<TeeTimeInsert>

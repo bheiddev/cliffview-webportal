@@ -3,7 +3,8 @@ import type { TeeTimeInsert, TeeTimeRow } from '../services/supabaseClient.ts'
 import {
   createTeeTime,
   deleteTeeTime,
-  listTeeTimes,
+  findFirstTeeTimeDate,
+  listTeeTimesInRange,
   updateTeeTime,
 } from '../services/teeTimesService.ts'
 import {
@@ -14,7 +15,6 @@ import {
   formatDayTabLabel,
   FUTURE_DATETIME_MESSAGE,
   isFutureDateTime,
-  isFutureTeeTime,
   localDateString,
   minTimeForDate,
 } from '../utils/datetime.ts'
@@ -30,7 +30,7 @@ const defaultForm = (date = ''): TeeTimeInsert => ({
   price: 0,
   spots_total: 4,
   spots_remaining: 4,
-  holes: 18,
+  holes: null,
   is_available: true,
   description: '',
 })
@@ -41,7 +41,7 @@ type EditDraft = {
   price: number
   spots_total: number
   spots_remaining: number
-  holes: 9 | 18
+  holes: 9 | 18 | null
   is_available: boolean
   description: string
 }
@@ -74,8 +74,10 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [selectedDate, setSelectedDate] = useState(today)
   const [windowStart, setWindowStart] = useState(today)
+  const [hasAlignedInitialDate, setHasAlignedInitialDate] = useState(false)
 
   const tabDates = useMemo(() => dayRange(windowStart), [windowStart])
+  const rangeEnd = tabDates[tabDates.length - 1] ?? windowStart
   const canPagePrev = compareISODate(windowStart, today) > 0
 
   const countsByDate = useMemo(() => {
@@ -97,7 +99,7 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
-    const result = await listTeeTimes()
+    const result = await listTeeTimesInRange(windowStart, rangeEnd)
     if (result.error) {
       setTeeTimes([])
       setError(result.error.message)
@@ -105,11 +107,39 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
       setTeeTimes(result.data)
     }
     setLoading(false)
-  }, [])
+  }, [windowStart, rangeEnd])
 
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (loading || error || hasAlignedInitialDate) return
+
+    void (async () => {
+      const selectedHasData = teeTimes.some((row) => row.date === selectedDate)
+
+      if (teeTimes.length === 0) {
+        const firstDate = await findFirstTeeTimeDate(today)
+        if (firstDate && firstDate !== windowStart) {
+          setSelectedDate(firstDate)
+          setWindowStart(firstDate)
+          return
+        }
+      } else if (!selectedHasData) {
+        const dates = [...new Set(teeTimes.map((row) => row.date))].sort()
+        const target =
+          dates.find((date) => compareISODate(date, today) >= 0) ?? dates[0]
+        if (target) {
+          setSelectedDate(target)
+          setWindowStart(target)
+          return
+        }
+      }
+
+      setHasAlignedInitialDate(true)
+    })()
+  }, [loading, error, teeTimes, selectedDate, today, windowStart, hasAlignedInitialDate])
 
   function shiftTabWindow(direction: -1 | 1) {
     const nextStart = addDays(windowStart, direction * DAYS_PER_TAB_PAGE)
@@ -158,17 +188,15 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
       return
     }
 
-    if (isFutureTeeTime(result.data)) {
-      setTeeTimes((prev) =>
-        [...prev, result.data].sort(
-          (a, b) =>
-            a.date.localeCompare(b.date) || a.time.localeCompare(b.time),
-        ),
-      )
-      setSelectedDate(result.data.date)
-      if (!tabDates.includes(result.data.date)) {
-        setWindowStart(result.data.date)
-      }
+    setTeeTimes((prev) =>
+      [...prev, result.data].sort(
+        (a, b) =>
+          a.date.localeCompare(b.date) || a.time.localeCompare(b.time),
+      ),
+    )
+    setSelectedDate(result.data.date)
+    if (!tabDates.includes(result.data.date)) {
+      setWindowStart(result.data.date)
     }
     setForm(defaultForm(selectedDate))
     setShowCreate(false)
@@ -218,7 +246,6 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
     setTeeTimes((prev) =>
       prev
         .map((r) => (r.id === id ? result.data : r))
-        .filter(isFutureTeeTime)
         .sort(
           (a, b) =>
             a.date.localeCompare(b.date) || a.time.localeCompare(b.time),
@@ -296,14 +323,17 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
             <label className="field">
               <span>Holes</span>
               <select
-                value={form.holes ?? 18}
+                value={form.holes ?? ''}
                 onChange={(e) =>
                   setForm({
                     ...form,
-                    holes: Number(e.target.value) as 9 | 18,
+                    holes: e.target.value
+                      ? (Number(e.target.value) as 9 | 18)
+                      : null,
                   })
                 }
               >
+                <option value="">—</option>
                 <option value={9}>9</option>
                 <option value={18}>18</option>
               </select>
@@ -452,8 +482,17 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
             Loading…
           </p>
         ) : null}
-        {!loading && !error && dayTeeTimes.length === 0 ? (
-          <p className="portal-empty">No tee times scheduled for this day.</p>
+        {!loading && !error && teeTimes.length === 0 ? (
+          <p className="portal-empty">
+            No tee times from today onward. Check Supabase RLS allows{' '}
+            <code>SELECT</code> for the anon key, or run the seed script.
+          </p>
+        ) : null}
+        {!loading && !error && teeTimes.length > 0 && dayTeeTimes.length === 0 ? (
+          <p className="portal-empty">
+            No tee times on this day. Use the date tabs or › to browse other
+            days.
+          </p>
         ) : null}
         {!loading && !error && dayTeeTimes.length > 0 ? (
           <div className="tee-time-grid" role="tabpanel">
@@ -489,14 +528,17 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                         <span>Holes</span>
                         <select
                           className="inline-input"
-                          value={editDraft.holes}
+                          value={editDraft.holes ?? ''}
                           onChange={(e) =>
                             setEditDraft({
                               ...editDraft,
-                              holes: Number(e.target.value) as 9 | 18,
+                              holes: e.target.value
+                                ? (Number(e.target.value) as 9 | 18)
+                                : null,
                             })
                           }
                         >
+                          <option value="">—</option>
                           <option value={9}>9</option>
                           <option value={18}>18</option>
                         </select>
@@ -586,7 +628,9 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                 <article key={row.id} className="tee-time-card">
                   <div className="tee-time-card__head">
                     <h3 className="tee-time-card__time">{formatTime(row.time)}</h3>
-                    <span className="tee-time-card__holes">{row.holes} holes</span>
+                    <span className="tee-time-card__holes">
+                      {row.holes != null ? `${row.holes} holes` : '—'}
+                    </span>
                   </div>
                   <p className="tee-time-card__price">{money.format(row.price)}</p>
                   <p className="tee-time-card__spots">
