@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { TeeTimeInsert, TeeTimeRow } from '../services/supabaseClient.ts'
 import {
   createTeeTime,
@@ -7,6 +7,11 @@ import {
   updateTeeTime,
 } from '../services/teeTimesService.ts'
 import {
+  addDays,
+  compareISODate,
+  dayRange,
+  DAYS_PER_TAB_PAGE,
+  formatDayTabLabel,
   FUTURE_DATETIME_MESSAGE,
   isFutureDateTime,
   isFutureTeeTime,
@@ -19,8 +24,8 @@ type TeeTimesPageProps = {
   onBack: () => void
 }
 
-const defaultForm = (): TeeTimeInsert => ({
-  date: '',
+const defaultForm = (date = ''): TeeTimeInsert => ({
+  date,
   time: '08:00',
   price: 0,
   spots_total: 4,
@@ -55,17 +60,39 @@ function rowToDraft(row: TeeTimeRow): EditDraft {
 }
 
 export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
+  const today = localDateString()
   const [teeTimes, setTeeTimes] = useState<TeeTimeRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState<TeeTimeInsert>(defaultForm)
+  const [form, setForm] = useState<TeeTimeInsert>(() => defaultForm())
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null)
   const [rowError, setRowError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [selectedDate, setSelectedDate] = useState(today)
+  const [windowStart, setWindowStart] = useState(today)
+
+  const tabDates = useMemo(() => dayRange(windowStart), [windowStart])
+  const canPagePrev = compareISODate(windowStart, today) > 0
+
+  const countsByDate = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const row of teeTimes) {
+      counts.set(row.date, (counts.get(row.date) ?? 0) + 1)
+    }
+    return counts
+  }, [teeTimes])
+
+  const dayTeeTimes = useMemo(
+    () =>
+      teeTimes
+        .filter((row) => row.date === selectedDate)
+        .sort((a, b) => a.time.localeCompare(b.time)),
+    [teeTimes, selectedDate],
+  )
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -83,6 +110,29 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
   useEffect(() => {
     void load()
   }, [load])
+
+  function shiftTabWindow(direction: -1 | 1) {
+    const nextStart = addDays(windowStart, direction * DAYS_PER_TAB_PAGE)
+    const clampedStart =
+      direction < 0 && compareISODate(nextStart, today) < 0 ? today : nextStart
+    const nextTabs = dayRange(clampedStart)
+
+    setWindowStart(clampedStart)
+    if (!nextTabs.includes(selectedDate)) {
+      setSelectedDate(nextTabs[0])
+    }
+  }
+
+  function openCreateForm() {
+    setShowCreate((open) => {
+      const next = !open
+      if (next) {
+        setForm(defaultForm(selectedDate))
+        setFormError(null)
+      }
+      return next
+    })
+  }
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault()
@@ -115,8 +165,12 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
             a.date.localeCompare(b.date) || a.time.localeCompare(b.time),
         ),
       )
+      setSelectedDate(result.data.date)
+      if (!tabDates.includes(result.data.date)) {
+        setWindowStart(result.data.date)
+      }
     }
-    setForm(defaultForm())
+    setForm(defaultForm(selectedDate))
     setShowCreate(false)
   }
 
@@ -170,6 +224,14 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
             a.date.localeCompare(b.date) || a.time.localeCompare(b.time),
         ),
     )
+
+    if (result.data.date !== selectedDate) {
+      setSelectedDate(result.data.date)
+      if (!tabDates.includes(result.data.date)) {
+        setWindowStart(result.data.date)
+      }
+    }
+
     cancelEdit()
   }
 
@@ -197,14 +259,7 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
         <button type="button" className="btn btn--ghost" onClick={onBack}>
           ← Home
         </button>
-        <button
-          type="button"
-          className="btn btn--primary"
-          onClick={() => {
-            setShowCreate((v) => !v)
-            setFormError(null)
-          }}
-        >
+        <button type="button" className="btn btn--primary" onClick={openCreateForm}>
           {showCreate ? 'Cancel' : 'Create tee time'}
         </button>
       </div>
@@ -333,8 +388,55 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
       <section className="portal-panel" aria-labelledby="tee-times-heading">
         <div className="portal-panel-head">
           <h2 id="tee-times-heading">Tee times</h2>
-          <span className="portal-count">{teeTimes.length}</span>
+          <span className="portal-count">{dayTeeTimes.length}</span>
         </div>
+
+        <div className="day-tabs" role="tablist" aria-label="Tee time dates">
+          <button
+            type="button"
+            className="day-tabs__nav"
+            onClick={() => shiftTabWindow(-1)}
+            disabled={!canPagePrev}
+            aria-label="Previous 7 days"
+          >
+            ‹
+          </button>
+          <div className="day-tabs__track">
+            {tabDates.map((date) => {
+              const label = formatDayTabLabel(date, today)
+              const count = countsByDate.get(date) ?? 0
+              const isSelected = date === selectedDate
+
+              return (
+                <button
+                  key={date}
+                  type="button"
+                  role="tab"
+                  aria-selected={isSelected}
+                  className={`day-tab${isSelected ? ' day-tab--active' : ''}${label.isToday ? ' day-tab--today' : ''}`}
+                  onClick={() => setSelectedDate(date)}
+                >
+                  <span className="day-tab__primary">{label.primary}</span>
+                  <span className="day-tab__secondary">{label.secondary}</span>
+                  {count > 0 ? (
+                    <span className="day-tab__count">{count}</span>
+                  ) : null}
+                </button>
+              )
+            })}
+          </div>
+          <button
+            type="button"
+            className="day-tabs__nav"
+            onClick={() => shiftTabWindow(1)}
+            aria-label="Next 7 days"
+          >
+            ›
+          </button>
+        </div>
+
+        <p className="day-tabs__summary">{formatDate(selectedDate)}</p>
+
         {error ? (
           <p className="portal-error" role="alert">
             {error}
@@ -350,206 +452,180 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
             Loading…
           </p>
         ) : null}
-        {!loading && !error && teeTimes.length === 0 ? (
-          <p className="portal-empty">No upcoming tee times.</p>
+        {!loading && !error && dayTeeTimes.length === 0 ? (
+          <p className="portal-empty">No tee times scheduled for this day.</p>
         ) : null}
-        {teeTimes.length > 0 ? (
-          <div className="portal-table-wrap">
-            <table className="portal-table portal-table--actions">
-              <thead>
-                <tr>
-                  <th scope="col">Date</th>
-                  <th scope="col">Time</th>
-                  <th scope="col">Holes</th>
-                  <th scope="col">Price</th>
-                  <th scope="col">Spots</th>
-                  <th scope="col">Available</th>
-                  <th scope="col">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {teeTimes.map((row) => {
-                  const isEditing = editingId === row.id
-                  const isBusy = busyId === row.id
-                  const label = `${formatDate(row.date)} ${formatTime(row.time)}`
+        {!loading && !error && dayTeeTimes.length > 0 ? (
+          <div className="tee-time-grid" role="tabpanel">
+            {dayTeeTimes.map((row) => {
+              const isEditing = editingId === row.id
+              const isBusy = busyId === row.id
+              const label = `${formatDate(row.date)} ${formatTime(row.time)}`
 
-                  if (isEditing && editDraft) {
-                    return (
-                      <tr key={row.id} className="portal-table-row--edit">
-                        <td>
-                          <input
-                            type="date"
-                            className="inline-input"
-                            min={localDateString()}
-                            value={editDraft.date}
-                            onChange={(e) =>
-                              setEditDraft({
-                                ...editDraft,
-                                date: e.target.value,
-                              })
-                            }
-                          />
-                        </td>
-                        <td>
-                          <input
-                            type="time"
-                            className="inline-input"
-                            min={minTimeForDate(editDraft.date)}
-                            value={editDraft.time}
-                            onChange={(e) =>
-                              setEditDraft({
-                                ...editDraft,
-                                time: e.target.value,
-                              })
-                            }
-                          />
-                        </td>
-                        <td>
-                          <select
-                            className="inline-input"
-                            value={editDraft.holes}
-                            onChange={(e) =>
-                              setEditDraft({
-                                ...editDraft,
-                                holes: Number(e.target.value) as 9 | 18,
-                              })
-                            }
-                          >
-                            <option value={9}>9</option>
-                            <option value={18}>18</option>
-                          </select>
-                        </td>
-                        <td>
-                          <input
-                            type="number"
-                            min={0}
-                            className="inline-input inline-input--narrow"
-                            value={editDraft.price}
-                            onChange={(e) =>
-                              setEditDraft({
-                                ...editDraft,
-                                price: Number(e.target.value),
-                              })
-                            }
-                          />
-                        </td>
-                        <td>
-                          <span className="inline-spots">
-                            <input
-                              type="number"
-                              min={0}
-                              className="inline-input inline-input--narrow"
-                              value={editDraft.spots_remaining}
-                              onChange={(e) =>
-                                setEditDraft({
-                                  ...editDraft,
-                                  spots_remaining: Number(e.target.value),
-                                })
-                              }
-                              aria-label="Spots remaining"
-                            />
-                            <span>/</span>
-                            <input
-                              type="number"
-                              min={1}
-                              className="inline-input inline-input--narrow"
-                              value={editDraft.spots_total}
-                              onChange={(e) =>
-                                setEditDraft({
-                                  ...editDraft,
-                                  spots_total: Number(e.target.value),
-                                })
-                              }
-                              aria-label="Spots total"
-                            />
-                          </span>
-                        </td>
-                        <td>
-                          <label className="inline-check">
-                            <input
-                              type="checkbox"
-                              checked={editDraft.is_available}
-                              onChange={(e) =>
-                                setEditDraft({
-                                  ...editDraft,
-                                  is_available: e.target.checked,
-                                })
-                              }
-                            />
-                            <span>Yes</span>
-                          </label>
-                        </td>
-                        <td>
-                          <div className="row-actions">
-                            <button
-                              type="button"
-                              className="btn btn--sm btn--primary"
-                              disabled={isBusy}
-                              onClick={() => void saveEdit(row.id)}
-                            >
-                              Save
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn--sm btn--ghost"
-                              disabled={isBusy}
-                              onClick={cancelEdit}
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  }
+              if (isEditing && editDraft) {
+                return (
+                  <article
+                    key={row.id}
+                    className="tee-time-card tee-time-card--edit"
+                  >
+                    <h3 className="tee-time-card__time">Edit {formatTime(row.time)}</h3>
+                    <div className="tee-time-card__edit-grid">
+                      <label className="field">
+                        <span>Time</span>
+                        <input
+                          type="time"
+                          className="inline-input"
+                          min={minTimeForDate(editDraft.date)}
+                          value={editDraft.time}
+                          onChange={(e) =>
+                            setEditDraft({
+                              ...editDraft,
+                              time: e.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Holes</span>
+                        <select
+                          className="inline-input"
+                          value={editDraft.holes}
+                          onChange={(e) =>
+                            setEditDraft({
+                              ...editDraft,
+                              holes: Number(e.target.value) as 9 | 18,
+                            })
+                          }
+                        >
+                          <option value={9}>9</option>
+                          <option value={18}>18</option>
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Price</span>
+                        <input
+                          type="number"
+                          min={0}
+                          className="inline-input"
+                          value={editDraft.price}
+                          onChange={(e) =>
+                            setEditDraft({
+                              ...editDraft,
+                              price: Number(e.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Spots remaining</span>
+                        <input
+                          type="number"
+                          min={0}
+                          className="inline-input"
+                          value={editDraft.spots_remaining}
+                          onChange={(e) =>
+                            setEditDraft({
+                              ...editDraft,
+                              spots_remaining: Number(e.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Total spots</span>
+                        <input
+                          type="number"
+                          min={1}
+                          className="inline-input"
+                          value={editDraft.spots_total}
+                          onChange={(e) =>
+                            setEditDraft({
+                              ...editDraft,
+                              spots_total: Number(e.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="field field--checkbox">
+                        <input
+                          type="checkbox"
+                          checked={editDraft.is_available}
+                          onChange={(e) =>
+                            setEditDraft({
+                              ...editDraft,
+                              is_available: e.target.checked,
+                            })
+                          }
+                        />
+                        <span>Available</span>
+                      </label>
+                    </div>
+                    <div className="row-actions">
+                      <button
+                        type="button"
+                        className="btn btn--sm btn--primary"
+                        disabled={isBusy}
+                        onClick={() => void saveEdit(row.id)}
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--sm btn--ghost"
+                        disabled={isBusy}
+                        onClick={cancelEdit}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </article>
+                )
+              }
 
-                  return (
-                    <tr key={row.id}>
-                      <td>{formatDate(row.date)}</td>
-                      <td>{formatTime(row.time)}</td>
-                      <td>{row.holes}</td>
-                      <td>{money.format(row.price)}</td>
-                      <td>
-                        {row.spots_remaining}/{row.spots_total}
-                      </td>
-                      <td>
-                        {row.is_available ? (
-                          <span className="portal-badge portal-badge--open">
-                            yes
-                          </span>
-                        ) : (
-                          <span className="portal-badge portal-badge--closed">
-                            no
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <div className="row-actions">
-                          <button
-                            type="button"
-                            className="btn btn--sm btn--ghost"
-                            disabled={isBusy || editingId !== null}
-                            onClick={() => startEdit(row)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn--sm btn--danger"
-                            disabled={isBusy || editingId !== null}
-                            onClick={() => void handleDelete(row.id, label)}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+              return (
+                <article key={row.id} className="tee-time-card">
+                  <div className="tee-time-card__head">
+                    <h3 className="tee-time-card__time">{formatTime(row.time)}</h3>
+                    <span className="tee-time-card__holes">{row.holes} holes</span>
+                  </div>
+                  <p className="tee-time-card__price">{money.format(row.price)}</p>
+                  <p className="tee-time-card__spots">
+                    {row.spots_remaining}/{row.spots_total} spots
+                  </p>
+                  <div className="tee-time-card__meta">
+                    {row.is_available ? (
+                      <span className="portal-badge portal-badge--open">open</span>
+                    ) : (
+                      <span className="portal-badge portal-badge--closed">closed</span>
+                    )}
+                    {row.spots_remaining === 0 ? (
+                      <span className="portal-badge portal-badge--closed">full</span>
+                    ) : null}
+                  </div>
+                  {row.description ? (
+                    <p className="tee-time-card__desc">{row.description}</p>
+                  ) : null}
+                  <div className="row-actions">
+                    <button
+                      type="button"
+                      className="btn btn--sm btn--ghost"
+                      disabled={isBusy || editingId !== null}
+                      onClick={() => startEdit(row)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--sm btn--danger"
+                      disabled={isBusy || editingId !== null}
+                      onClick={() => void handleDelete(row.id, label)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </article>
+              )
+            })}
           </div>
         ) : null}
       </section>
