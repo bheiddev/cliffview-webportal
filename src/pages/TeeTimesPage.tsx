@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { TeeTimeInsert, TeeTimeRow } from '../services/supabaseClient.ts'
+import type {
+  TeeTimeBookingRow,
+  TeeTimeInsert,
+  TeeTimeRow,
+} from '../services/supabaseClient.ts'
+import {
+  bookTeeTimeForGuest,
+  listTeeTimeBookings,
+} from '../services/bookingsService.ts'
 import {
   createTeeTime,
   deleteTeeTime,
@@ -7,6 +15,7 @@ import {
   listTeeTimesInRange,
   updateTeeTime,
 } from '../services/teeTimesService.ts'
+import { formatBookingPartyLabel } from '../utils/bookings.ts'
 import {
   addDays,
   compareISODate,
@@ -46,6 +55,18 @@ type EditDraft = {
   description: string
 }
 
+type BookDraft = {
+  guestName: string
+  phone: string
+  golfers: number
+}
+
+const defaultBookForm = (maxGolfers = 1): BookDraft => ({
+  guestName: '',
+  phone: '',
+  golfers: Math.max(1, maxGolfers > 0 ? 1 : 0),
+})
+
 function rowToDraft(row: TeeTimeRow): EditDraft {
   return {
     date: row.date,
@@ -72,6 +93,11 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null)
   const [rowError, setRowError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [bookings, setBookings] = useState<TeeTimeBookingRow[]>([])
+  const [bookingTeeTimeId, setBookingTeeTimeId] = useState<string | null>(null)
+  const [bookForm, setBookForm] = useState<BookDraft>(defaultBookForm())
+  const [bookError, setBookError] = useState<string | null>(null)
+  const [bookSaving, setBookSaving] = useState(false)
   const [selectedDate, setSelectedDate] = useState(today)
   const [windowStart, setWindowStart] = useState(today)
   const [hasAlignedInitialDate, setHasAlignedInitialDate] = useState(false)
@@ -96,15 +122,30 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
     [teeTimes, selectedDate],
   )
 
+  const bookingsByTeeTimeId = useMemo(() => {
+    const map = new Map<string, TeeTimeBookingRow[]>()
+    for (const booking of bookings) {
+      const list = map.get(booking.tee_time_id) ?? []
+      list.push(booking)
+      map.set(booking.tee_time_id, list)
+    }
+    return map
+  }, [bookings])
+
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     const result = await listTeeTimesInRange(windowStart, rangeEnd)
     if (result.error) {
       setTeeTimes([])
+      setBookings([])
       setError(result.error.message)
     } else {
       setTeeTimes(result.data)
+      const bookingsResult = await listTeeTimeBookings(
+        result.data.map((row) => row.id),
+      )
+      setBookings(bookingsResult.error ? [] : bookingsResult.data)
     }
     setLoading(false)
   }, [windowStart, rangeEnd])
@@ -206,12 +247,59 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
     setEditingId(row.id)
     setEditDraft(rowToDraft(row))
     setRowError(null)
+    cancelBook()
   }
 
   function cancelEdit() {
     setEditingId(null)
     setEditDraft(null)
     setRowError(null)
+  }
+
+  function startBook(row: TeeTimeRow) {
+    setBookingTeeTimeId(row.id)
+    setBookForm(defaultBookForm(row.spots_remaining))
+    setBookError(null)
+    cancelEdit()
+  }
+
+  function cancelBook() {
+    setBookingTeeTimeId(null)
+    setBookError(null)
+  }
+
+  async function handleBook(e: FormEvent, row: TeeTimeRow) {
+    e.preventDefault()
+    setBookSaving(true)
+    setBookError(null)
+
+    const golfers = Math.min(
+      Math.max(1, bookForm.golfers),
+      row.spots_remaining,
+    )
+
+    const result = await bookTeeTimeForGuest(row.id, {
+      guestName: bookForm.guestName,
+      phone: bookForm.phone,
+      golfers,
+    })
+
+    setBookSaving(false)
+
+    if (result.error) {
+      setBookError(result.error.message)
+      return
+    }
+
+    setTeeTimes((prev) =>
+      prev.map((r) =>
+        r.id === row.id
+          ? { ...r, spots_remaining: result.data.spotsRemaining }
+          : r,
+      ),
+    )
+    setBookings((prev) => [...prev, result.data.booking])
+    cancelBook()
   }
 
   async function saveEdit(id: string) {
@@ -498,8 +586,100 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
           <div className="tee-time-grid" role="tabpanel">
             {dayTeeTimes.map((row) => {
               const isEditing = editingId === row.id
+              const isBooking = bookingTeeTimeId === row.id
               const isBusy = busyId === row.id
               const label = `${formatDate(row.date)} ${formatTime(row.time)}`
+              const slotBookings = bookingsByTeeTimeId.get(row.id) ?? []
+              const canBook =
+                row.spots_remaining > 0 &&
+                row.is_available &&
+                !isEditing &&
+                !isBooking
+
+              if (isBooking) {
+                return (
+                  <article
+                    key={row.id}
+                    className="tee-time-card tee-time-card--book"
+                  >
+                    <h3 className="tee-time-card__time">
+                      Book {formatTime(row.time)}
+                    </h3>
+                    <p className="tee-time-card__spots">
+                      {row.spots_remaining} of {row.spots_total} spots left
+                    </p>
+                    <form
+                      className="tee-time-card__book-form"
+                      onSubmit={(e) => void handleBook(e, row)}
+                    >
+                      {bookError ? (
+                        <p className="portal-error" role="alert">
+                          {bookError}
+                        </p>
+                      ) : null}
+                      <label className="field">
+                        <span>Guest name</span>
+                        <input
+                          required
+                          value={bookForm.guestName}
+                          onChange={(e) =>
+                            setBookForm({
+                              ...bookForm,
+                              guestName: e.target.value,
+                            })
+                          }
+                          placeholder="Joe Smith"
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Phone</span>
+                        <input
+                          required
+                          type="tel"
+                          value={bookForm.phone}
+                          onChange={(e) =>
+                            setBookForm({ ...bookForm, phone: e.target.value })
+                          }
+                          placeholder="555-123-4567"
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Golfers</span>
+                        <input
+                          required
+                          type="number"
+                          min={1}
+                          max={row.spots_remaining}
+                          value={bookForm.golfers}
+                          onChange={(e) =>
+                            setBookForm({
+                              ...bookForm,
+                              golfers: Number(e.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                      <div className="row-actions">
+                        <button
+                          type="submit"
+                          className="btn btn--sm btn--primary"
+                          disabled={bookSaving}
+                        >
+                          {bookSaving ? 'Booking…' : 'Confirm booking'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--sm btn--ghost"
+                          disabled={bookSaving}
+                          onClick={cancelBook}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  </article>
+                )
+              }
 
               if (isEditing && editDraft) {
                 return (
@@ -649,11 +829,45 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                   {row.description ? (
                     <p className="tee-time-card__desc">{row.description}</p>
                   ) : null}
+                  {slotBookings.length > 0 ? (
+                    <ul className="tee-time-card__bookings">
+                      {slotBookings.map((booking) => (
+                        <li key={booking.id} className="tee-time-card__booking">
+                          <span className="tee-time-card__booking-name">
+                            {formatBookingPartyLabel(
+                              booking.guest_name,
+                              booking.golfers,
+                            )}
+                          </span>
+                          {booking.phone ? (
+                            <span className="tee-time-card__booking-phone">
+                              {booking.phone}
+                            </span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                   <div className="row-actions">
                     <button
                       type="button"
+                      className="btn btn--sm btn--primary"
+                      disabled={
+                        !canBook ||
+                        isBusy ||
+                        editingId !== null ||
+                        bookingTeeTimeId !== null
+                      }
+                      onClick={() => startBook(row)}
+                    >
+                      Book
+                    </button>
+                    <button
+                      type="button"
                       className="btn btn--sm btn--ghost"
-                      disabled={isBusy || editingId !== null}
+                      disabled={
+                        isBusy || editingId !== null || bookingTeeTimeId !== null
+                      }
                       onClick={() => startEdit(row)}
                     >
                       Edit
@@ -661,7 +875,9 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                     <button
                       type="button"
                       className="btn btn--sm btn--danger"
-                      disabled={isBusy || editingId !== null}
+                      disabled={
+                        isBusy || editingId !== null || bookingTeeTimeId !== null
+                      }
                       onClick={() => void handleDelete(row.id, label)}
                     >
                       Delete

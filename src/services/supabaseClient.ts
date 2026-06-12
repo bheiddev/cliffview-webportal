@@ -28,6 +28,22 @@ export type TeeTimeInsert = {
 
 export type TeeTimeUpdate = Partial<TeeTimeInsert>
 
+export type BookingStatus = 'confirmed' | 'cancelled' | 'refunded'
+
+export type BookingSource = 'guest_app' | 'agent'
+
+/** Confirmed tee time booking shown on agent portal cards. */
+export type TeeTimeBookingRow = {
+  id: string
+  tee_time_id: string
+  guest_name: string
+  phone: string | null
+  golfers: number
+  status: BookingStatus
+  source: BookingSource
+  created_at: string
+}
+
 export type TournamentStatus =
   | 'draft'
   | 'open'
@@ -99,9 +115,34 @@ export type Database = {
         Update: TournamentUpdate
         Relationships: []
       }
+      bookings: {
+        Row: TeeTimeBookingRow & {
+          booking_type: 'tee_time' | 'tournament'
+          tournament_id: string | null
+          email: string | null
+          amount_cents: number
+          square_payment_id: string | null
+        }
+        Insert: Record<string, never>
+        Update: Record<string, never>
+        Relationships: []
+      }
     }
     Views: Record<string, never>
-    Functions: Record<string, never>
+    Functions: {
+      book_tee_time_agent: {
+        Args: {
+          p_tee_time_id: string
+          p_guest_name: string
+          p_phone: string
+          p_golfers: number
+        }
+        Returns: {
+          booking_id: string
+          spots_remaining: number
+        }
+      }
+    }
   }
 }
 
