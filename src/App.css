@@ -6,8 +6,19 @@
 }
 
 .portal-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
   padding: 28px 0 20px;
   border-bottom: 1px solid var(--border);
+}
+
+.portal-logo {
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  border-radius: 8px;
 }
 
 .portal-title {
@@ -643,13 +654,19 @@
 
 .reservation {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  gap: 10px;
   padding: 10px 12px;
   border-radius: 8px;
   background: var(--code-bg);
   border: 1px solid var(--border);
+}
+
+.reservation__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .reservation__info {
@@ -657,6 +674,23 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+}
+
+.reservation__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.reservation__change {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.reservation__change .inline-input {
+  width: 100%;
 }
 
 .reservation__name {

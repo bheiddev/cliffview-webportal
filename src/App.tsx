@@ -18,8 +18,15 @@ function App() {
   return (
     <div className="portal">
       <header className="portal-header">
-        <h1 className="portal-title">Cliffview</h1>
-        <p className="portal-subtitle">{subtitles[page]}</p>
+        <img
+          className="portal-logo"
+          src="/CliffViewLogo.webp"
+          alt="Cliffview logo"
+        />
+        <div className="portal-header__text">
+          <h1 className="portal-title">Cliffview</h1>
+          <p className="portal-subtitle">{subtitles[page]}</p>
+        </div>
       </header>
 
       <main className="portal-main">

@@ -155,6 +155,29 @@ export type Database = {
           paid_at: string | null
         }
       }
+      cancel_tee_time_booking: {
+        Args: {
+          p_booking_id: string
+        }
+        Returns: {
+          booking_id: string
+          tee_time_id: string
+          spots_remaining: number
+        }
+      }
+      move_tee_time_booking: {
+        Args: {
+          p_booking_id: string
+          p_new_tee_time_id: string
+        }
+        Returns: {
+          booking_id: string
+          old_tee_time_id: string
+          new_tee_time_id: string
+          old_spots_remaining: number
+          new_spots_remaining: number
+        }
+      }
     }
   }
 }

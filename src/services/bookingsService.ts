@@ -172,3 +172,103 @@ export async function setBookingPaymentStatus(
     return { data: null, error: new Error(message) }
   }
 }
+
+export type CancelBookingResult =
+  | { data: { teeTimeId: string; spotsRemaining: number }; error: null }
+  | { data: null; error: Error }
+
+export async function cancelTeeTimeBooking(
+  bookingId: string,
+): Promise<CancelBookingResult> {
+  try {
+    const supabase = getSupabaseClient()
+    const { data, error } = await supabase.rpc('cancel_tee_time_booking', {
+      p_booking_id: bookingId,
+    })
+
+    if (error) {
+      return { data: null, error: new Error(error.message) }
+    }
+
+    const body = data as {
+      tee_time_id?: string
+      spots_remaining?: number
+    } | null
+
+    if (!body?.tee_time_id || body.spots_remaining === undefined) {
+      return {
+        data: null,
+        error: new Error('Cancel succeeded but the response was incomplete.'),
+      }
+    }
+
+    return {
+      data: { teeTimeId: body.tee_time_id, spotsRemaining: body.spots_remaining },
+      error: null,
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    return { data: null, error: new Error(message) }
+  }
+}
+
+export type MoveBookingResult =
+  | {
+      data: {
+        oldTeeTimeId: string
+        newTeeTimeId: string
+        oldSpotsRemaining: number
+        newSpotsRemaining: number
+      }
+      error: null
+    }
+  | { data: null; error: Error }
+
+export async function moveTeeTimeBooking(
+  bookingId: string,
+  newTeeTimeId: string,
+): Promise<MoveBookingResult> {
+  try {
+    const supabase = getSupabaseClient()
+    const { data, error } = await supabase.rpc('move_tee_time_booking', {
+      p_booking_id: bookingId,
+      p_new_tee_time_id: newTeeTimeId,
+    })
+
+    if (error) {
+      return { data: null, error: new Error(error.message) }
+    }
+
+    const body = data as {
+      old_tee_time_id?: string
+      new_tee_time_id?: string
+      old_spots_remaining?: number
+      new_spots_remaining?: number
+    } | null
+
+    if (
+      !body?.old_tee_time_id ||
+      !body.new_tee_time_id ||
+      body.old_spots_remaining === undefined ||
+      body.new_spots_remaining === undefined
+    ) {
+      return {
+        data: null,
+        error: new Error('Move succeeded but the response was incomplete.'),
+      }
+    }
+
+    return {
+      data: {
+        oldTeeTimeId: body.old_tee_time_id,
+        newTeeTimeId: body.new_tee_time_id,
+        oldSpotsRemaining: body.old_spots_remaining,
+        newSpotsRemaining: body.new_spots_remaining,
+      },
+      error: null,
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    return { data: null, error: new Error(message) }
+  }
+}

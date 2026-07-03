@@ -5,11 +5,14 @@ import type {
 } from '../services/supabaseClient.ts'
 import {
   bookTeeTimeForGuest,
+  cancelTeeTimeBooking,
   listTeeTimeBookings,
+  moveTeeTimeBooking,
   setBookingPaymentStatus,
 } from '../services/bookingsService.ts'
 import {
   findFirstTeeTimeDate,
+  listTeeTimes,
   listTeeTimesInRange,
 } from '../services/teeTimesService.ts'
 import { formatBookingPartyLabel } from '../utils/bookings.ts'
@@ -55,6 +58,11 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
   const [paymentError, setPaymentError] = useState<string | null>(null)
   const [bookingsError, setBookingsError] = useState<string | null>(null)
   const [viewingTeeTimeId, setViewingTeeTimeId] = useState<string | null>(null)
+  const [moveOptions, setMoveOptions] = useState<TeeTimeRow[]>([])
+  const [changingBookingId, setChangingBookingId] = useState<string | null>(null)
+  const [moveTargetId, setMoveTargetId] = useState('')
+  const [actionBookingId, setActionBookingId] = useState<string | null>(null)
+  const [modalError, setModalError] = useState<string | null>(null)
   const [selectedDate, setSelectedDate] = useState(today)
   const [windowStart, setWindowStart] = useState(today)
   const [hasAlignedInitialDate, setHasAlignedInitialDate] = useState(false)
@@ -168,11 +176,99 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
   function openView(row: TeeTimeRow) {
     setViewingTeeTimeId(row.id)
     setPaymentError(null)
+    setModalError(null)
+    setChangingBookingId(null)
+    setMoveTargetId('')
+    void (async () => {
+      const result = await listTeeTimes()
+      if (!result.error) setMoveOptions(result.data)
+    })()
   }
 
   function closeView() {
     setViewingTeeTimeId(null)
     setPaymentError(null)
+    setModalError(null)
+    setChangingBookingId(null)
+    setMoveTargetId('')
+  }
+
+  function startChange(bookingId: string) {
+    setChangingBookingId(bookingId)
+    setMoveTargetId('')
+    setModalError(null)
+  }
+
+  function cancelChange() {
+    setChangingBookingId(null)
+    setMoveTargetId('')
+  }
+
+  async function handleCancelBooking(booking: TeeTimeBookingRow) {
+    if (
+      !window.confirm(
+        `Cancel the reservation for ${booking.guest_name}? This frees up ${booking.golfers} spot(s).`,
+      )
+    ) {
+      return
+    }
+
+    setActionBookingId(booking.id)
+    setModalError(null)
+
+    const result = await cancelTeeTimeBooking(booking.id)
+
+    setActionBookingId(null)
+
+    if (result.error) {
+      setModalError(result.error.message)
+      return
+    }
+
+    setTeeTimes((prev) =>
+      prev.map((r) =>
+        r.id === result.data.teeTimeId
+          ? { ...r, spots_remaining: result.data.spotsRemaining }
+          : r,
+      ),
+    )
+    setBookings((prev) => prev.filter((b) => b.id !== booking.id))
+  }
+
+  async function handleMoveBooking(booking: TeeTimeBookingRow) {
+    if (!moveTargetId) return
+
+    setActionBookingId(booking.id)
+    setModalError(null)
+
+    const result = await moveTeeTimeBooking(booking.id, moveTargetId)
+
+    setActionBookingId(null)
+
+    if (result.error) {
+      setModalError(result.error.message)
+      return
+    }
+
+    const { oldTeeTimeId, newTeeTimeId, oldSpotsRemaining, newSpotsRemaining } =
+      result.data
+
+    setTeeTimes((prev) =>
+      prev.map((r) => {
+        if (r.id === oldTeeTimeId)
+          return { ...r, spots_remaining: oldSpotsRemaining }
+        if (r.id === newTeeTimeId)
+          return { ...r, spots_remaining: newSpotsRemaining }
+        return r
+      }),
+    )
+    setBookings((prev) =>
+      prev.map((b) =>
+        b.id === booking.id ? { ...b, tee_time_id: newTeeTimeId } : b,
+      ),
+    )
+    setChangingBookingId(null)
+    setMoveTargetId('')
   }
 
   function cancelBook() {
@@ -219,6 +315,7 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
     const nextPaid = booking.payment_status !== 'paid'
     setPayingBookingId(booking.id)
     setPaymentError(null)
+    setModalError(null)
 
     const result = await setBookingPaymentStatus(booking.id, nextPaid)
 
@@ -557,52 +654,128 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                 {paymentError}
               </p>
             ) : null}
+            {modalError ? (
+              <p className="portal-error" role="alert">
+                {modalError}
+              </p>
+            ) : null}
+            {viewingBookings.length === 0 ? (
+              <p className="portal-empty">No reservations on this tee time.</p>
+            ) : null}
             <ul className="reservation-list">
               {viewingBookings.map((booking) => {
                 const isPaid = booking.payment_status === 'paid'
+                const isChanging = changingBookingId === booking.id
+                const isActing = actionBookingId === booking.id
+                const changeOptions = moveOptions.filter(
+                  (o) =>
+                    o.id !== booking.tee_time_id &&
+                    o.is_available &&
+                    o.spots_remaining >= booking.golfers,
+                )
                 return (
                   <li key={booking.id} className="reservation">
-                    <div className="reservation__info">
-                      <span className="reservation__name">
-                        {formatBookingPartyLabel(
-                          booking.guest_name,
-                          booking.golfers,
-                        )}
-                      </span>
-                      {booking.phone ? (
-                        <span className="reservation__detail">
-                          {booking.phone}
+                    <div className="reservation__row">
+                      <div className="reservation__info">
+                        <span className="reservation__name">
+                          {formatBookingPartyLabel(
+                            booking.guest_name,
+                            booking.golfers,
+                          )}
                         </span>
-                      ) : null}
-                      {booking.email ? (
-                        <span className="reservation__detail">
-                          {booking.email}
+                        {booking.phone ? (
+                          <span className="reservation__detail">
+                            {booking.phone}
+                          </span>
+                        ) : null}
+                        {booking.email ? (
+                          <span className="reservation__detail">
+                            {booking.email}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="reservation__pay">
+                        <span
+                          className={`portal-badge ${
+                            isPaid
+                              ? 'portal-badge--open'
+                              : 'portal-badge--closed'
+                          }`}
+                        >
+                          {isPaid ? 'Paid' : 'Unpaid'}
                         </span>
-                      ) : null}
+                        <button
+                          type="button"
+                          className="btn btn--sm btn--ghost"
+                          disabled={payingBookingId === booking.id}
+                          onClick={() => void handleTogglePaid(booking)}
+                        >
+                          {payingBookingId === booking.id
+                            ? 'Saving…'
+                            : isPaid
+                              ? 'Mark unpaid'
+                              : 'Mark paid'}
+                        </button>
+                      </div>
                     </div>
-                    <div className="reservation__pay">
-                      <span
-                        className={`portal-badge ${
-                          isPaid
-                            ? 'portal-badge--open'
-                            : 'portal-badge--closed'
-                        }`}
-                      >
-                        {isPaid ? 'Paid' : 'Unpaid'}
-                      </span>
-                      <button
-                        type="button"
-                        className="btn btn--sm btn--ghost"
-                        disabled={payingBookingId === booking.id}
-                        onClick={() => void handleTogglePaid(booking)}
-                      >
-                        {payingBookingId === booking.id
-                          ? 'Saving…'
-                          : isPaid
-                            ? 'Mark unpaid'
-                            : 'Mark paid'}
-                      </button>
-                    </div>
+                    {isChanging ? (
+                      <div className="reservation__change">
+                        <select
+                          className="inline-input"
+                          value={moveTargetId}
+                          onChange={(e) => setMoveTargetId(e.target.value)}
+                        >
+                          <option value="">
+                            {changeOptions.length > 0
+                              ? 'Select a tee time…'
+                              : 'No other available tee times'}
+                          </option>
+                          {changeOptions.map((o) => (
+                            <option key={o.id} value={o.id}>
+                              {formatDate(o.date)} · {formatTime(o.time)} (
+                              {o.spots_remaining} left)
+                            </option>
+                          ))}
+                        </select>
+                        <div className="reservation__actions">
+                          <button
+                            type="button"
+                            className="btn btn--sm btn--primary"
+                            disabled={!moveTargetId || isActing}
+                            onClick={() => void handleMoveBooking(booking)}
+                          >
+                            {isActing ? 'Moving…' : 'Move'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn--sm btn--ghost"
+                            disabled={isActing}
+                            onClick={cancelChange}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="reservation__actions">
+                        <button
+                          type="button"
+                          className="btn btn--sm btn--ghost"
+                          disabled={isActing}
+                          onClick={() => startChange(booking.id)}
+                        >
+                          Change
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--sm btn--danger"
+                          disabled={isActing}
+                          onClick={() => void handleCancelBooking(booking)}
+                        >
+                          {isActing ? 'Cancelling…' : 'Cancel'}
+                        </button>
+                      </div>
+                    )}
                   </li>
                 )
               })}
