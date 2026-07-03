@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import type {
   TeeTimeBookingRow,
-  TeeTimeInsert,
   TeeTimeRow,
 } from '../services/supabaseClient.ts'
 import {
@@ -10,11 +9,8 @@ import {
   setBookingPaymentStatus,
 } from '../services/bookingsService.ts'
 import {
-  createTeeTime,
-  deleteTeeTime,
   findFirstTeeTimeDate,
   listTeeTimesInRange,
-  updateTeeTime,
 } from '../services/teeTimesService.ts'
 import { formatBookingPartyLabel } from '../utils/bookings.ts'
 import {
@@ -23,37 +19,12 @@ import {
   dayRange,
   DAYS_PER_TAB_PAGE,
   formatDayTabLabel,
-  FUTURE_DATETIME_MESSAGE,
-  isFutureDateTime,
   localDateString,
-  minTimeForDate,
 } from '../utils/datetime.ts'
-import { formatDate, formatTime, money, toTimeInputValue } from '../utils/format.ts'
+import { formatDate, formatTime, money } from '../utils/format.ts'
 
 type TeeTimesPageProps = {
   onBack: () => void
-}
-
-const defaultForm = (date = ''): TeeTimeInsert => ({
-  date,
-  time: '08:00',
-  price: 0,
-  spots_total: 4,
-  spots_remaining: 4,
-  holes: null,
-  is_available: true,
-  description: '',
-})
-
-type EditDraft = {
-  date: string
-  time: string
-  price: number
-  spots_total: number
-  spots_remaining: number
-  holes: 9 | 18 | null
-  is_available: boolean
-  description: string
 }
 
 type BookDraft = {
@@ -70,32 +41,11 @@ const defaultBookForm = (maxGolfers = 1): BookDraft => ({
   golfers: Math.max(1, maxGolfers > 0 ? 1 : 0),
 })
 
-function rowToDraft(row: TeeTimeRow): EditDraft {
-  return {
-    date: row.date,
-    time: toTimeInputValue(row.time),
-    price: row.price,
-    spots_total: row.spots_total,
-    spots_remaining: row.spots_remaining,
-    holes: row.holes,
-    is_available: row.is_available,
-    description: row.description ?? '',
-  }
-}
-
 export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
   const today = localDateString()
   const [teeTimes, setTeeTimes] = useState<TeeTimeRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState<TeeTimeInsert>(() => defaultForm())
-  const [saving, setSaving] = useState(false)
-  const [formError, setFormError] = useState<string | null>(null)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editDraft, setEditDraft] = useState<EditDraft | null>(null)
-  const [rowError, setRowError] = useState<string | null>(null)
-  const [busyId, setBusyId] = useState<string | null>(null)
   const [bookings, setBookings] = useState<TeeTimeBookingRow[]>([])
   const [bookingTeeTimeId, setBookingTeeTimeId] = useState<string | null>(null)
   const [bookForm, setBookForm] = useState<BookDraft>(defaultBookForm())
@@ -103,6 +53,7 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
   const [bookSaving, setBookSaving] = useState(false)
   const [payingBookingId, setPayingBookingId] = useState<string | null>(null)
   const [paymentError, setPaymentError] = useState<string | null>(null)
+  const [bookingsError, setBookingsError] = useState<string | null>(null)
   const [selectedDate, setSelectedDate] = useState(today)
   const [windowStart, setWindowStart] = useState(today)
   const [hasAlignedInitialDate, setHasAlignedInitialDate] = useState(false)
@@ -140,6 +91,7 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setBookingsError(null)
     const result = await listTeeTimesInRange(windowStart, rangeEnd)
     if (result.error) {
       setTeeTimes([])
@@ -150,7 +102,14 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
       const bookingsResult = await listTeeTimeBookings(
         result.data.map((row) => row.id),
       )
-      setBookings(bookingsResult.error ? [] : bookingsResult.data)
+      if (bookingsResult.error) {
+        setBookings([])
+        setBookingsError(
+          `Could not load reservations: ${bookingsResult.error.message}`,
+        )
+      } else {
+        setBookings(bookingsResult.data)
+      }
     }
     setLoading(false)
   }, [windowStart, rangeEnd])
@@ -199,73 +158,10 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
     }
   }
 
-  function openCreateForm() {
-    setShowCreate((open) => {
-      const next = !open
-      if (next) {
-        setForm(defaultForm(selectedDate))
-        setFormError(null)
-      }
-      return next
-    })
-  }
-
-  async function handleCreate(e: FormEvent) {
-    e.preventDefault()
-    setSaving(true)
-    setFormError(null)
-
-    if (!isFutureDateTime(form.date, form.time)) {
-      setFormError(FUTURE_DATETIME_MESSAGE)
-      setSaving(false)
-      return
-    }
-
-    const payload: TeeTimeInsert = {
-      ...form,
-      description: form.description?.trim() || null,
-    }
-
-    const result = await createTeeTime(payload)
-    setSaving(false)
-
-    if (result.error) {
-      setFormError(result.error.message)
-      return
-    }
-
-    setTeeTimes((prev) =>
-      [...prev, result.data].sort(
-        (a, b) =>
-          a.date.localeCompare(b.date) || a.time.localeCompare(b.time),
-      ),
-    )
-    setSelectedDate(result.data.date)
-    if (!tabDates.includes(result.data.date)) {
-      setWindowStart(result.data.date)
-    }
-    setForm(defaultForm(selectedDate))
-    setShowCreate(false)
-  }
-
-  function startEdit(row: TeeTimeRow) {
-    setEditingId(row.id)
-    setEditDraft(rowToDraft(row))
-    setRowError(null)
-    cancelBook()
-  }
-
-  function cancelEdit() {
-    setEditingId(null)
-    setEditDraft(null)
-    setRowError(null)
-  }
-
   function startBook(row: TeeTimeRow) {
     setBookingTeeTimeId(row.id)
     setBookForm(defaultBookForm(row.spots_remaining))
     setBookError(null)
-    cancelEdit()
   }
 
   function cancelBook() {
@@ -335,206 +231,13 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
     )
   }
 
-  async function saveEdit(id: string) {
-    if (!editDraft) return
-
-    if (!isFutureDateTime(editDraft.date, editDraft.time)) {
-      setRowError(FUTURE_DATETIME_MESSAGE)
-      return
-    }
-
-    setBusyId(id)
-    setRowError(null)
-
-    const result = await updateTeeTime(id, {
-      date: editDraft.date,
-      time: editDraft.time,
-      price: editDraft.price,
-      spots_total: editDraft.spots_total,
-      spots_remaining: editDraft.spots_remaining,
-      holes: editDraft.holes,
-      is_available: editDraft.is_available,
-      description: editDraft.description.trim() || null,
-    })
-
-    setBusyId(null)
-
-    if (result.error) {
-      setRowError(result.error.message)
-      return
-    }
-
-    setTeeTimes((prev) =>
-      prev
-        .map((r) => (r.id === id ? result.data : r))
-        .sort(
-          (a, b) =>
-            a.date.localeCompare(b.date) || a.time.localeCompare(b.time),
-        ),
-    )
-
-    if (result.data.date !== selectedDate) {
-      setSelectedDate(result.data.date)
-      if (!tabDates.includes(result.data.date)) {
-        setWindowStart(result.data.date)
-      }
-    }
-
-    cancelEdit()
-  }
-
-  async function handleDelete(id: string, label: string) {
-    if (!window.confirm(`Delete tee time on ${label}?`)) return
-
-    setBusyId(id)
-    setRowError(null)
-
-    const result = await deleteTeeTime(id)
-    setBusyId(null)
-
-    if (result.error) {
-      setRowError(result.error.message)
-      return
-    }
-
-    setTeeTimes((prev) => prev.filter((r) => r.id !== id))
-    if (editingId === id) cancelEdit()
-  }
-
   return (
     <>
       <div className="page-toolbar">
         <button type="button" className="btn btn--ghost" onClick={onBack}>
           ← Home
         </button>
-        <button type="button" className="btn btn--primary" onClick={openCreateForm}>
-          {showCreate ? 'Cancel' : 'Create tee time'}
-        </button>
       </div>
-
-      {showCreate ? (
-        <form className="create-form" onSubmit={handleCreate}>
-          <h3 className="create-form-title">New tee time</h3>
-          {formError ? (
-            <p className="portal-error" role="alert">
-              {formError}
-            </p>
-          ) : null}
-          <div className="create-form-grid">
-            <label className="field">
-              <span>Date</span>
-              <input
-                type="date"
-                required
-                min={localDateString()}
-                value={form.date}
-                onChange={(e) => setForm({ ...form, date: e.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span>Time</span>
-              <input
-                type="time"
-                required
-                min={minTimeForDate(form.date)}
-                value={form.time}
-                onChange={(e) => setForm({ ...form, time: e.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span>Holes</span>
-              <select
-                value={form.holes ?? ''}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    holes: e.target.value
-                      ? (Number(e.target.value) as 9 | 18)
-                      : null,
-                  })
-                }
-              >
-                <option value="">—</option>
-                <option value={9}>9</option>
-                <option value={18}>18</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>Price</span>
-              <input
-                type="number"
-                min={0}
-                required
-                value={form.price}
-                onChange={(e) =>
-                  setForm({ ...form, price: Number(e.target.value) })
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Total spots</span>
-              <input
-                type="number"
-                min={1}
-                required
-                value={form.spots_total}
-                onChange={(e) => {
-                  const spots = Number(e.target.value)
-                  setForm({
-                    ...form,
-                    spots_total: spots,
-                    spots_remaining: spots,
-                  })
-                }}
-              />
-            </label>
-            <label className="field">
-              <span>Spots remaining</span>
-              <input
-                type="number"
-                min={0}
-                required
-                value={form.spots_remaining}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    spots_remaining: Number(e.target.value),
-                  })
-                }
-              />
-            </label>
-            <label className="field field--checkbox">
-              <input
-                type="checkbox"
-                checked={form.is_available ?? true}
-                onChange={(e) =>
-                  setForm({ ...form, is_available: e.target.checked })
-                }
-              />
-              <span>Available</span>
-            </label>
-            <label className="field field--wide">
-              <span>Description</span>
-              <input
-                value={form.description ?? ''}
-                onChange={(e) =>
-                  setForm({ ...form, description: e.target.value })
-                }
-                placeholder="Optional"
-              />
-            </label>
-          </div>
-          <div className="create-form-actions">
-            <button
-              type="submit"
-              className="btn btn--primary"
-              disabled={saving}
-            >
-              {saving ? 'Saving…' : 'Save tee time'}
-            </button>
-          </div>
-        </form>
-      ) : null}
 
       <section className="portal-panel" aria-labelledby="tee-times-heading">
         <div className="portal-panel-head">
@@ -593,9 +296,9 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
             {error}
           </p>
         ) : null}
-        {rowError ? (
+        {bookingsError ? (
           <p className="portal-error" role="alert">
-            {rowError}
+            {bookingsError}
           </p>
         ) : null}
         {loading ? (
@@ -618,16 +321,10 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
         {!loading && !error && dayTeeTimes.length > 0 ? (
           <div className="tee-time-grid" role="tabpanel">
             {dayTeeTimes.map((row) => {
-              const isEditing = editingId === row.id
               const isBooking = bookingTeeTimeId === row.id
-              const isBusy = busyId === row.id
-              const label = `${formatDate(row.date)} ${formatTime(row.time)}`
               const slotBookings = bookingsByTeeTimeId.get(row.id) ?? []
               const canBook =
-                row.spots_remaining > 0 &&
-                row.is_available &&
-                !isEditing &&
-                !isBooking
+                row.spots_remaining > 0 && row.is_available && !isBooking
 
               if (isBooking) {
                 return (
@@ -721,129 +418,6 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                         </button>
                       </div>
                     </form>
-                  </article>
-                )
-              }
-
-              if (isEditing && editDraft) {
-                return (
-                  <article
-                    key={row.id}
-                    className="tee-time-card tee-time-card--edit"
-                  >
-                    <h3 className="tee-time-card__time">Edit {formatTime(row.time)}</h3>
-                    <div className="tee-time-card__edit-grid">
-                      <label className="field">
-                        <span>Time</span>
-                        <input
-                          type="time"
-                          className="inline-input"
-                          min={minTimeForDate(editDraft.date)}
-                          value={editDraft.time}
-                          onChange={(e) =>
-                            setEditDraft({
-                              ...editDraft,
-                              time: e.target.value,
-                            })
-                          }
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Holes</span>
-                        <select
-                          className="inline-input"
-                          value={editDraft.holes ?? ''}
-                          onChange={(e) =>
-                            setEditDraft({
-                              ...editDraft,
-                              holes: e.target.value
-                                ? (Number(e.target.value) as 9 | 18)
-                                : null,
-                            })
-                          }
-                        >
-                          <option value="">—</option>
-                          <option value={9}>9</option>
-                          <option value={18}>18</option>
-                        </select>
-                      </label>
-                      <label className="field">
-                        <span>Price</span>
-                        <input
-                          type="number"
-                          min={0}
-                          className="inline-input"
-                          value={editDraft.price}
-                          onChange={(e) =>
-                            setEditDraft({
-                              ...editDraft,
-                              price: Number(e.target.value),
-                            })
-                          }
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Spots remaining</span>
-                        <input
-                          type="number"
-                          min={0}
-                          className="inline-input"
-                          value={editDraft.spots_remaining}
-                          onChange={(e) =>
-                            setEditDraft({
-                              ...editDraft,
-                              spots_remaining: Number(e.target.value),
-                            })
-                          }
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Total spots</span>
-                        <input
-                          type="number"
-                          min={1}
-                          className="inline-input"
-                          value={editDraft.spots_total}
-                          onChange={(e) =>
-                            setEditDraft({
-                              ...editDraft,
-                              spots_total: Number(e.target.value),
-                            })
-                          }
-                        />
-                      </label>
-                      <label className="field field--checkbox">
-                        <input
-                          type="checkbox"
-                          checked={editDraft.is_available}
-                          onChange={(e) =>
-                            setEditDraft({
-                              ...editDraft,
-                              is_available: e.target.checked,
-                            })
-                          }
-                        />
-                        <span>Available</span>
-                      </label>
-                    </div>
-                    <div className="row-actions">
-                      <button
-                        type="button"
-                        className="btn btn--sm btn--primary"
-                        disabled={isBusy}
-                        onClick={() => void saveEdit(row.id)}
-                      >
-                        Save
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn--sm btn--ghost"
-                        disabled={isBusy}
-                        onClick={cancelEdit}
-                      >
-                        Cancel
-                      </button>
-                    </div>
                   </article>
                 )
               }
@@ -944,35 +518,10 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                     <button
                       type="button"
                       className="btn btn--sm btn--primary"
-                      disabled={
-                        !canBook ||
-                        isBusy ||
-                        editingId !== null ||
-                        bookingTeeTimeId !== null
-                      }
+                      disabled={!canBook || bookingTeeTimeId !== null}
                       onClick={() => startBook(row)}
                     >
                       Book
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn--sm btn--ghost"
-                      disabled={
-                        isBusy || editingId !== null || bookingTeeTimeId !== null
-                      }
-                      onClick={() => startEdit(row)}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn--sm btn--danger"
-                      disabled={
-                        isBusy || editingId !== null || bookingTeeTimeId !== null
-                      }
-                      onClick={() => void handleDelete(row.id, label)}
-                    >
-                      Delete
                     </button>
                   </div>
                 </article>
