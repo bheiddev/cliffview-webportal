@@ -24,7 +24,7 @@ import {
   formatDayTabLabel,
   localDateString,
 } from '../utils/datetime.ts'
-import { formatDate, formatTime, money } from '../utils/format.ts'
+import { formatDate, formatTime } from '../utils/format.ts'
 
 type TeeTimesPageProps = {
   onBack: () => void
@@ -550,7 +550,6 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                       {row.holes != null ? `${row.holes} holes` : '—'}
                     </span>
                   </div>
-                  <p className="tee-time-card__price">{money.format(row.price)}</p>
                   <p className="tee-time-card__spots">
                     {row.spots_remaining}/{row.spots_total} spots
                   </p>

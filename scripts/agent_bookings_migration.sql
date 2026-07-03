@@ -299,3 +299,31 @@ $$;
 
 REVOKE ALL ON FUNCTION public.move_tee_time_booking(uuid, uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.move_tee_time_booking(uuid, uuid) TO anon, authenticated;
+
+-- App bookings are paid via Square; derive payment_status from square_payment_id.
+UPDATE public.bookings
+SET payment_status = 'paid',
+    paid_at = COALESCE(paid_at, created_at)
+WHERE square_payment_id IS NOT NULL
+  AND payment_status <> 'paid';
+
+CREATE OR REPLACE FUNCTION public.bookings_set_paid_on_square()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.square_payment_id IS NOT NULL THEN
+    NEW.payment_status := 'paid';
+    IF NEW.paid_at IS NULL THEN
+      NEW.paid_at := COALESCE(NEW.created_at, now());
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS bookings_set_paid_on_square ON public.bookings;
+CREATE TRIGGER bookings_set_paid_on_square
+  BEFORE INSERT ON public.bookings
+  FOR EACH ROW
+  EXECUTE FUNCTION public.bookings_set_paid_on_square();
