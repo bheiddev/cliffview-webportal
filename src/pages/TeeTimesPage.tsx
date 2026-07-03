@@ -71,14 +71,6 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
   const rangeEnd = tabDates[tabDates.length - 1] ?? windowStart
   const canPagePrev = compareISODate(windowStart, today) > 0
 
-  const countsByDate = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const row of teeTimes) {
-      counts.set(row.date, (counts.get(row.date) ?? 0) + 1)
-    }
-    return counts
-  }, [teeTimes])
-
   const dayTeeTimes = useMemo(
     () =>
       teeTimes
@@ -373,7 +365,6 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
           <div className="day-tabs__track">
             {tabDates.map((date) => {
               const label = formatDayTabLabel(date, today)
-              const count = countsByDate.get(date) ?? 0
               const isSelected = date === selectedDate
 
               return (
@@ -387,9 +378,6 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                 >
                   <span className="day-tab__primary">{label.primary}</span>
                   <span className="day-tab__secondary">{label.secondary}</span>
-                  {count > 0 ? (
-                    <span className="day-tab__count">{count}</span>
-                  ) : null}
                 </button>
               )
             })}
@@ -538,17 +526,20 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
               }
 
               const isFull = row.spots_remaining === 0
+              const isLow = row.spots_remaining > 0 && row.spots_remaining < 4
+              const cardModifier = isFull
+                ? ' tee-time-card--full'
+                : isLow
+                  ? ' tee-time-card--low'
+                  : ''
 
               return (
                 <article
                   key={row.id}
-                  className={`tee-time-card${isFull ? ' tee-time-card--full' : ''}`}
+                  className={`tee-time-card${cardModifier}`}
                 >
                   <div className="tee-time-card__head">
                     <h3 className="tee-time-card__time">{formatTime(row.time)}</h3>
-                    <span className="tee-time-card__holes">
-                      {row.holes != null ? `${row.holes} holes` : '—'}
-                    </span>
                   </div>
                   <p className="tee-time-card__spots">
                     {row.spots_remaining}/{row.spots_total} spots

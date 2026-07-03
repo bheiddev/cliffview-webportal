@@ -554,6 +554,11 @@
   background: var(--danger-bg);
 }
 
+.tee-time-card--low {
+  border-color: #d99e00;
+  background: rgba(217, 158, 0, 0.1);
+}
+
 .tee-time-card--edit {
   grid-column: 1 / -1;
   background: #fafcfa;
@@ -581,7 +586,7 @@
 .tee-time-card__booking {
   display: flex;
   flex-direction: row;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
   padding: 5px 8px;
@@ -591,12 +596,17 @@
 }
 
 .tee-time-card__booking-name {
+  flex: 1;
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-h);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.tee-time-card__booking .portal-badge {
+  flex-shrink: 0;
 }
 
 /* Reservations modal */
