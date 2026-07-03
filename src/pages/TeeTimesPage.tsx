@@ -54,6 +54,7 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
   const [payingBookingId, setPayingBookingId] = useState<string | null>(null)
   const [paymentError, setPaymentError] = useState<string | null>(null)
   const [bookingsError, setBookingsError] = useState<string | null>(null)
+  const [viewingTeeTimeId, setViewingTeeTimeId] = useState<string | null>(null)
   const [selectedDate, setSelectedDate] = useState(today)
   const [windowStart, setWindowStart] = useState(today)
   const [hasAlignedInitialDate, setHasAlignedInitialDate] = useState(false)
@@ -164,6 +165,16 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
     setBookError(null)
   }
 
+  function openView(row: TeeTimeRow) {
+    setViewingTeeTimeId(row.id)
+    setPaymentError(null)
+  }
+
+  function closeView() {
+    setViewingTeeTimeId(null)
+    setPaymentError(null)
+  }
+
   function cancelBook() {
     setBookingTeeTimeId(null)
     setBookError(null)
@@ -230,6 +241,13 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
       ),
     )
   }
+
+  const viewingRow = viewingTeeTimeId
+    ? (teeTimes.find((r) => r.id === viewingTeeTimeId) ?? null)
+    : null
+  const viewingBookings = viewingTeeTimeId
+    ? (bookingsByTeeTimeId.get(viewingTeeTimeId) ?? [])
+    : []
 
   return (
     <>
@@ -453,66 +471,33 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                     <p className="tee-time-card__desc">{row.description}</p>
                   ) : null}
                   {slotBookings.length > 0 ? (
-                    <>
-                      {paymentError ? (
-                        <p className="portal-error" role="alert">
-                          {paymentError}
-                        </p>
-                      ) : null}
-                      <ul className="tee-time-card__bookings">
-                        {slotBookings.map((booking) => {
-                          const isPaid = booking.payment_status === 'paid'
-                          return (
-                            <li
-                              key={booking.id}
-                              className="tee-time-card__booking"
+                    <ul className="tee-time-card__bookings">
+                      {slotBookings.map((booking) => {
+                        const isPaid = booking.payment_status === 'paid'
+                        return (
+                          <li
+                            key={booking.id}
+                            className="tee-time-card__booking"
+                          >
+                            <span className="tee-time-card__booking-name">
+                              {formatBookingPartyLabel(
+                                booking.guest_name,
+                                booking.golfers,
+                              )}
+                            </span>
+                            <span
+                              className={`portal-badge ${
+                                isPaid
+                                  ? 'portal-badge--open'
+                                  : 'portal-badge--closed'
+                              }`}
                             >
-                              <div className="tee-time-card__booking-info">
-                                <span className="tee-time-card__booking-name">
-                                  {formatBookingPartyLabel(
-                                    booking.guest_name,
-                                    booking.golfers,
-                                  )}
-                                </span>
-                                {booking.phone ? (
-                                  <span className="tee-time-card__booking-phone">
-                                    {booking.phone}
-                                  </span>
-                                ) : null}
-                                {booking.email ? (
-                                  <span className="tee-time-card__booking-email">
-                                    {booking.email}
-                                  </span>
-                                ) : null}
-                              </div>
-                              <div className="tee-time-card__booking-pay">
-                                <span
-                                  className={`portal-badge ${
-                                    isPaid
-                                      ? 'portal-badge--open'
-                                      : 'portal-badge--closed'
-                                  }`}
-                                >
-                                  {isPaid ? 'Paid' : 'Unpaid'}
-                                </span>
-                                <button
-                                  type="button"
-                                  className="btn btn--sm btn--ghost"
-                                  disabled={payingBookingId === booking.id}
-                                  onClick={() => void handleTogglePaid(booking)}
-                                >
-                                  {payingBookingId === booking.id
-                                    ? 'Saving…'
-                                    : isPaid
-                                      ? 'Mark unpaid'
-                                      : 'Mark paid'}
-                                </button>
-                              </div>
-                            </li>
-                          )
-                        })}
-                      </ul>
-                    </>
+                              {isPaid ? 'Paid' : 'Unpaid'}
+                            </span>
+                          </li>
+                        )
+                      })}
+                    </ul>
                   ) : null}
                   <div className="row-actions">
                     <button
@@ -523,6 +508,15 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                     >
                       Book
                     </button>
+                    {slotBookings.length > 0 ? (
+                      <button
+                        type="button"
+                        className="btn btn--sm btn--ghost"
+                        onClick={() => openView(row)}
+                      >
+                        View
+                      </button>
+                    ) : null}
                   </div>
                 </article>
               )
@@ -530,6 +524,92 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
           </div>
         ) : null}
       </section>
+
+      {viewingRow ? (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Reservations"
+          onClick={closeView}
+        >
+          <div
+            className="modal-card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-card__head">
+              <h3 className="modal-card__title">
+                Reservations · {formatTime(viewingRow.time)}
+              </h3>
+              <button
+                type="button"
+                className="btn btn--sm btn--ghost"
+                onClick={closeView}
+              >
+                Close
+              </button>
+            </div>
+            <p className="modal-card__subtitle">
+              {formatDate(viewingRow.date)}
+            </p>
+            {paymentError ? (
+              <p className="portal-error" role="alert">
+                {paymentError}
+              </p>
+            ) : null}
+            <ul className="reservation-list">
+              {viewingBookings.map((booking) => {
+                const isPaid = booking.payment_status === 'paid'
+                return (
+                  <li key={booking.id} className="reservation">
+                    <div className="reservation__info">
+                      <span className="reservation__name">
+                        {formatBookingPartyLabel(
+                          booking.guest_name,
+                          booking.golfers,
+                        )}
+                      </span>
+                      {booking.phone ? (
+                        <span className="reservation__detail">
+                          {booking.phone}
+                        </span>
+                      ) : null}
+                      {booking.email ? (
+                        <span className="reservation__detail">
+                          {booking.email}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="reservation__pay">
+                      <span
+                        className={`portal-badge ${
+                          isPaid
+                            ? 'portal-badge--open'
+                            : 'portal-badge--closed'
+                        }`}
+                      >
+                        {isPaid ? 'Paid' : 'Unpaid'}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn--sm btn--ghost"
+                        disabled={payingBookingId === booking.id}
+                        onClick={() => void handleTogglePaid(booking)}
+                      >
+                        {payingBookingId === booking.id
+                          ? 'Saving…'
+                          : isPaid
+                            ? 'Mark unpaid'
+                            : 'Mark paid'}
+                      </button>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        </div>
+      ) : null}
     </>
   )
 }
