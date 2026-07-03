@@ -7,6 +7,7 @@ import type {
 import {
   bookTeeTimeForGuest,
   listTeeTimeBookings,
+  setBookingPaymentStatus,
 } from '../services/bookingsService.ts'
 import {
   createTeeTime,
@@ -58,12 +59,14 @@ type EditDraft = {
 type BookDraft = {
   guestName: string
   phone: string
+  email: string
   golfers: number
 }
 
 const defaultBookForm = (maxGolfers = 1): BookDraft => ({
   guestName: '',
   phone: '',
+  email: '',
   golfers: Math.max(1, maxGolfers > 0 ? 1 : 0),
 })
 
@@ -98,6 +101,8 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
   const [bookForm, setBookForm] = useState<BookDraft>(defaultBookForm())
   const [bookError, setBookError] = useState<string | null>(null)
   const [bookSaving, setBookSaving] = useState(false)
+  const [payingBookingId, setPayingBookingId] = useState<string | null>(null)
+  const [paymentError, setPaymentError] = useState<string | null>(null)
   const [selectedDate, setSelectedDate] = useState(today)
   const [windowStart, setWindowStart] = useState(today)
   const [hasAlignedInitialDate, setHasAlignedInitialDate] = useState(false)
@@ -281,6 +286,7 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
     const result = await bookTeeTimeForGuest(row.id, {
       guestName: bookForm.guestName,
       phone: bookForm.phone,
+      email: bookForm.email,
       golfers,
     })
 
@@ -300,6 +306,33 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
     )
     setBookings((prev) => [...prev, result.data.booking])
     cancelBook()
+  }
+
+  async function handleTogglePaid(booking: TeeTimeBookingRow) {
+    const nextPaid = booking.payment_status !== 'paid'
+    setPayingBookingId(booking.id)
+    setPaymentError(null)
+
+    const result = await setBookingPaymentStatus(booking.id, nextPaid)
+
+    setPayingBookingId(null)
+
+    if (result.error) {
+      setPaymentError(result.error.message)
+      return
+    }
+
+    setBookings((prev) =>
+      prev.map((b) =>
+        b.id === booking.id
+          ? {
+              ...b,
+              payment_status: result.data.paymentStatus,
+              paid_at: result.data.paidAt,
+            }
+          : b,
+      ),
+    )
   }
 
   async function saveEdit(id: string) {
@@ -644,6 +677,17 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                         />
                       </label>
                       <label className="field">
+                        <span>Email (optional)</span>
+                        <input
+                          type="email"
+                          value={bookForm.email}
+                          onChange={(e) =>
+                            setBookForm({ ...bookForm, email: e.target.value })
+                          }
+                          placeholder="joe@example.com"
+                        />
+                      </label>
+                      <label className="field">
                         <span>Golfers</span>
                         <input
                           required
@@ -804,8 +848,13 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                 )
               }
 
+              const isFull = row.spots_remaining === 0
+
               return (
-                <article key={row.id} className="tee-time-card">
+                <article
+                  key={row.id}
+                  className={`tee-time-card${isFull ? ' tee-time-card--full' : ''}`}
+                >
                   <div className="tee-time-card__head">
                     <h3 className="tee-time-card__time">{formatTime(row.time)}</h3>
                     <span className="tee-time-card__holes">
@@ -830,23 +879,66 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                     <p className="tee-time-card__desc">{row.description}</p>
                   ) : null}
                   {slotBookings.length > 0 ? (
-                    <ul className="tee-time-card__bookings">
-                      {slotBookings.map((booking) => (
-                        <li key={booking.id} className="tee-time-card__booking">
-                          <span className="tee-time-card__booking-name">
-                            {formatBookingPartyLabel(
-                              booking.guest_name,
-                              booking.golfers,
-                            )}
-                          </span>
-                          {booking.phone ? (
-                            <span className="tee-time-card__booking-phone">
-                              {booking.phone}
-                            </span>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
+                    <>
+                      {paymentError ? (
+                        <p className="portal-error" role="alert">
+                          {paymentError}
+                        </p>
+                      ) : null}
+                      <ul className="tee-time-card__bookings">
+                        {slotBookings.map((booking) => {
+                          const isPaid = booking.payment_status === 'paid'
+                          return (
+                            <li
+                              key={booking.id}
+                              className="tee-time-card__booking"
+                            >
+                              <div className="tee-time-card__booking-info">
+                                <span className="tee-time-card__booking-name">
+                                  {formatBookingPartyLabel(
+                                    booking.guest_name,
+                                    booking.golfers,
+                                  )}
+                                </span>
+                                {booking.phone ? (
+                                  <span className="tee-time-card__booking-phone">
+                                    {booking.phone}
+                                  </span>
+                                ) : null}
+                                {booking.email ? (
+                                  <span className="tee-time-card__booking-email">
+                                    {booking.email}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="tee-time-card__booking-pay">
+                                <span
+                                  className={`portal-badge ${
+                                    isPaid
+                                      ? 'portal-badge--open'
+                                      : 'portal-badge--closed'
+                                  }`}
+                                >
+                                  {isPaid ? 'Paid' : 'Unpaid'}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="btn btn--sm btn--ghost"
+                                  disabled={payingBookingId === booking.id}
+                                  onClick={() => void handleTogglePaid(booking)}
+                                >
+                                  {payingBookingId === booking.id
+                                    ? 'Saving…'
+                                    : isPaid
+                                      ? 'Mark unpaid'
+                                      : 'Mark paid'}
+                                </button>
+                              </div>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    </>
                   ) : null}
                   <div className="row-actions">
                     <button

@@ -1,20 +1,9 @@
--- Agent tee time bookings for the admin portal.
--- Run in Supabase SQL Editor after bookings_schema.sql (cliffview-golf).
+-- Tee time reservations for the admin portal.
+-- Site bookings do NOT process payment: we only capture name/phone/email/golfers.
+-- Payment is collected in the pro shop when golfers arrive.
+-- Run in Supabase SQL Editor against the existing public.bookings table.
 
--- Allow walk-in / phone bookings without Square payment.
-ALTER TABLE public.bookings
-  ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'guest_app';
-
-ALTER TABLE public.bookings
-  DROP CONSTRAINT IF EXISTS bookings_source_check;
-
-ALTER TABLE public.bookings
-  ADD CONSTRAINT bookings_source_check
-  CHECK (source IN ('guest_app', 'agent'));
-
-ALTER TABLE public.bookings
-  ALTER COLUMN square_payment_id DROP NOT NULL;
-
+-- Allow no-payment reservations: amount can be 0.
 ALTER TABLE public.bookings
   DROP CONSTRAINT IF EXISTS bookings_amount_cents_check;
 
@@ -22,15 +11,23 @@ ALTER TABLE public.bookings
   ADD CONSTRAINT bookings_amount_cents_check
   CHECK (amount_cents >= 0);
 
+-- Allow no-payment reservations: no Square payment id required.
 ALTER TABLE public.bookings
-  DROP CONSTRAINT IF EXISTS bookings_payment_source_check;
+  ALTER COLUMN square_payment_id DROP NOT NULL;
+
+-- Track whether payment was remitted in the pro shop.
+ALTER TABLE public.bookings
+  ADD COLUMN IF NOT EXISTS payment_status text NOT NULL DEFAULT 'unpaid';
 
 ALTER TABLE public.bookings
-  ADD CONSTRAINT bookings_payment_source_check
-  CHECK (
-    (source = 'guest_app' AND square_payment_id IS NOT NULL AND amount_cents > 0)
-    OR (source = 'agent' AND square_payment_id IS NULL)
-  );
+  ADD COLUMN IF NOT EXISTS paid_at timestamptz NULL;
+
+ALTER TABLE public.bookings
+  DROP CONSTRAINT IF EXISTS bookings_payment_status_check;
+
+ALTER TABLE public.bookings
+  ADD CONSTRAINT bookings_payment_status_check
+  CHECK (payment_status IN ('unpaid', 'paid'));
 
 -- Portal anon key: read confirmed tee time bookings.
 DROP POLICY IF EXISTS "Allow anon read tee time bookings" ON public.bookings;
@@ -42,12 +39,13 @@ CREATE POLICY "Allow anon read tee time bookings"
 
 GRANT SELECT ON public.bookings TO anon;
 
--- Atomic agent booking: insert row + decrement spots_remaining.
+-- Atomic reservation: insert row + decrement spots_remaining. No payment.
 CREATE OR REPLACE FUNCTION public.book_tee_time_agent(
   p_tee_time_id uuid,
   p_guest_name text,
   p_phone text,
-  p_golfers integer
+  p_golfers integer,
+  p_email text DEFAULT NULL
 )
 RETURNS json
 LANGUAGE plpgsql
@@ -58,14 +56,19 @@ DECLARE
   v_spots_remaining integer;
   v_booking_id uuid;
   v_guest_name text := trim(p_guest_name);
-  v_phone text := trim(p_phone);
+  v_phone text := nullif(trim(p_phone), '');
+  v_email text := nullif(trim(p_email), '');
 BEGIN
   IF v_guest_name IS NULL OR v_guest_name = '' THEN
     RAISE EXCEPTION 'Guest name is required';
   END IF;
 
-  IF v_phone IS NULL OR v_phone = '' THEN
+  IF v_phone IS NULL THEN
     RAISE EXCEPTION 'Phone number is required';
+  END IF;
+
+  IF v_email IS NOT NULL AND v_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' THEN
+    RAISE EXCEPTION 'Email address is invalid';
   END IF;
 
   IF p_golfers IS NULL OR p_golfers < 1 THEN
@@ -97,22 +100,22 @@ BEGIN
     tee_time_id,
     guest_name,
     phone,
+    email,
     golfers,
     amount_cents,
     square_payment_id,
-    status,
-    source
+    status
   )
   VALUES (
     'tee_time',
     p_tee_time_id,
     v_guest_name,
     v_phone,
+    v_email,
     p_golfers,
     0,
     NULL,
-    'confirmed',
-    'agent'
+    'confirmed'
   )
   RETURNING id INTO v_booking_id;
 
@@ -123,5 +126,45 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.book_tee_time_agent(uuid, text, text, integer) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.book_tee_time_agent(uuid, text, text, integer) TO anon, authenticated;
+-- Drop any previous overload so the RPC call resolves unambiguously.
+DROP FUNCTION IF EXISTS public.book_tee_time_agent(uuid, text, text, integer);
+
+REVOKE ALL ON FUNCTION public.book_tee_time_agent(uuid, text, text, integer, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.book_tee_time_agent(uuid, text, text, integer, text) TO anon, authenticated;
+
+-- Staff mark a reservation paid/unpaid when the golfer settles up in the shop.
+CREATE OR REPLACE FUNCTION public.set_booking_payment_status(
+  p_booking_id uuid,
+  p_paid boolean
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_payment_status text := CASE WHEN p_paid THEN 'paid' ELSE 'unpaid' END;
+  v_paid_at timestamptz := CASE WHEN p_paid THEN now() ELSE NULL END;
+  v_id uuid;
+BEGIN
+  UPDATE public.bookings
+  SET payment_status = v_payment_status,
+      paid_at = v_paid_at
+  WHERE id = p_booking_id
+    AND booking_type = 'tee_time'
+  RETURNING id INTO v_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Booking not found';
+  END IF;
+
+  RETURN json_build_object(
+    'booking_id', v_id,
+    'payment_status', v_payment_status,
+    'paid_at', v_paid_at
+  );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.set_booking_payment_status(uuid, boolean) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.set_booking_payment_status(uuid, boolean) TO anon, authenticated;

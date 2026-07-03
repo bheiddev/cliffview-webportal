@@ -30,7 +30,7 @@ export type TeeTimeUpdate = Partial<TeeTimeInsert>
 
 export type BookingStatus = 'confirmed' | 'cancelled' | 'refunded'
 
-export type BookingSource = 'guest_app' | 'agent'
+export type PaymentStatus = 'unpaid' | 'paid'
 
 /** Confirmed tee time booking shown on agent portal cards. */
 export type TeeTimeBookingRow = {
@@ -38,9 +38,11 @@ export type TeeTimeBookingRow = {
   tee_time_id: string
   guest_name: string
   phone: string | null
+  email: string | null
   golfers: number
   status: BookingStatus
-  source: BookingSource
+  payment_status: PaymentStatus
+  paid_at: string | null
   created_at: string
 }
 
@@ -119,7 +121,6 @@ export type Database = {
         Row: TeeTimeBookingRow & {
           booking_type: 'tee_time' | 'tournament'
           tournament_id: string | null
-          email: string | null
           amount_cents: number
           square_payment_id: string | null
         }
@@ -136,10 +137,22 @@ export type Database = {
           p_guest_name: string
           p_phone: string
           p_golfers: number
+          p_email?: string | null
         }
         Returns: {
           booking_id: string
           spots_remaining: number
+        }
+      }
+      set_booking_payment_status: {
+        Args: {
+          p_booking_id: string
+          p_paid: boolean
+        }
+        Returns: {
+          booking_id: string
+          payment_status: PaymentStatus
+          paid_at: string | null
         }
       }
     }

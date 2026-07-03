@@ -1,10 +1,17 @@
-import { getSupabaseClient, type TeeTimeBookingRow } from './supabaseClient.ts'
+import {
+  getSupabaseClient,
+  type PaymentStatus,
+  type TeeTimeBookingRow,
+} from './supabaseClient.ts'
 
 export type AgentBookingInput = {
   guestName: string
   phone: string
+  email?: string
   golfers: number
 }
+
+const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
 
 export type AgentBookingResult =
   | {
@@ -33,7 +40,7 @@ export async function listTeeTimeBookings(
     const { data, error } = await supabase
       .from('bookings')
       .select(
-        'id, tee_time_id, guest_name, phone, golfers, status, source, created_at',
+        'id, tee_time_id, guest_name, phone, email, golfers, status, payment_status, paid_at, created_at',
       )
       .eq('booking_type', 'tee_time')
       .eq('status', 'confirmed')
@@ -57,12 +64,16 @@ export async function bookTeeTimeForGuest(
 ): Promise<AgentBookingResult> {
   const guestName = input.guestName.trim()
   const phone = input.phone.trim()
+  const email = input.email?.trim() ?? ''
 
   if (!guestName) {
     return { data: null, error: new Error('Guest name is required.') }
   }
   if (!phone) {
     return { data: null, error: new Error('Phone number is required.') }
+  }
+  if (email && !EMAIL_PATTERN.test(email)) {
+    return { data: null, error: new Error('Email address is invalid.') }
   }
   if (!Number.isInteger(input.golfers) || input.golfers < 1) {
     return { data: null, error: new Error('At least one golfer is required.') }
@@ -75,6 +86,7 @@ export async function bookTeeTimeForGuest(
       p_guest_name: guestName,
       p_phone: phone,
       p_golfers: input.golfers,
+      p_email: email || null,
     })
 
     if (error) {
@@ -98,9 +110,11 @@ export async function bookTeeTimeForGuest(
       tee_time_id: teeTimeId,
       guest_name: guestName,
       phone,
+      email: email || null,
       golfers: input.golfers,
       status: 'confirmed',
-      source: 'agent',
+      payment_status: 'unpaid',
+      paid_at: null,
       created_at: new Date().toISOString(),
     }
 
@@ -110,6 +124,47 @@ export async function bookTeeTimeForGuest(
         spotsRemaining: body.spots_remaining,
         booking,
       },
+      error: null,
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    return { data: null, error: new Error(message) }
+  }
+}
+
+export type SetPaymentStatusResult =
+  | { data: { paymentStatus: PaymentStatus; paidAt: string | null }; error: null }
+  | { data: null; error: Error }
+
+export async function setBookingPaymentStatus(
+  bookingId: string,
+  paid: boolean,
+): Promise<SetPaymentStatusResult> {
+  try {
+    const supabase = getSupabaseClient()
+    const { data, error } = await supabase.rpc('set_booking_payment_status', {
+      p_booking_id: bookingId,
+      p_paid: paid,
+    })
+
+    if (error) {
+      return { data: null, error: new Error(error.message) }
+    }
+
+    const body = data as {
+      payment_status?: PaymentStatus
+      paid_at?: string | null
+    } | null
+
+    if (!body?.payment_status) {
+      return {
+        data: null,
+        error: new Error('Update succeeded but the response was incomplete.'),
+      }
+    }
+
+    return {
+      data: { paymentStatus: body.payment_status, paidAt: body.paid_at ?? null },
       error: null,
     }
   } catch (e) {

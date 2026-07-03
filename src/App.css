@@ -534,6 +534,11 @@
   box-shadow: var(--shadow);
 }
 
+.tee-time-card--full {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+
 .tee-time-card--edit {
   grid-column: 1 / -1;
   background: #fafcfa;
@@ -561,12 +566,28 @@
 
 .tee-time-card__booking {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   padding: 8px 10px;
   border-radius: 8px;
   background: var(--code-bg);
   border: 1px solid var(--border);
+}
+
+.tee-time-card__booking-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tee-time-card__booking-pay {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .tee-time-card__booking-name {
@@ -575,7 +596,8 @@
   color: var(--text-h);
 }
 
-.tee-time-card__booking-phone {
+.tee-time-card__booking-phone,
+.tee-time-card__booking-email {
   font-size: 12px;
   color: var(--text);
   font-family: var(--mono);
