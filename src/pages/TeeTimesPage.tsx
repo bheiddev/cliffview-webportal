@@ -9,6 +9,7 @@ import {
   listTeeTimeBookings,
   moveTeeTimeBooking,
   setBookingPaymentStatus,
+  updateBookingContact,
 } from '../services/bookingsService.ts'
 import {
   findFirstTeeTimeDate,
@@ -63,6 +64,8 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
   const [moveTargetId, setMoveTargetId] = useState('')
   const [actionBookingId, setActionBookingId] = useState<string | null>(null)
   const [modalError, setModalError] = useState<string | null>(null)
+  const [editingBookingId, setEditingBookingId] = useState<string | null>(null)
+  const [editContact, setEditContact] = useState({ phone: '', email: '' })
   const [selectedDate, setSelectedDate] = useState(today)
   const [windowStart, setWindowStart] = useState(today)
   const [hasAlignedInitialDate, setHasAlignedInitialDate] = useState(false)
@@ -171,6 +174,7 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
     setModalError(null)
     setChangingBookingId(null)
     setMoveTargetId('')
+    setEditingBookingId(null)
     void (async () => {
       const result = await listTeeTimes()
       if (!result.error) setMoveOptions(result.data)
@@ -183,17 +187,56 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
     setModalError(null)
     setChangingBookingId(null)
     setMoveTargetId('')
+    setEditingBookingId(null)
   }
 
   function startChange(bookingId: string) {
     setChangingBookingId(bookingId)
     setMoveTargetId('')
+    setEditingBookingId(null)
     setModalError(null)
   }
 
   function cancelChange() {
     setChangingBookingId(null)
     setMoveTargetId('')
+  }
+
+  function startEditContact(booking: TeeTimeBookingRow) {
+    setEditingBookingId(booking.id)
+    setEditContact({ phone: booking.phone ?? '', email: booking.email ?? '' })
+    setChangingBookingId(null)
+    setModalError(null)
+  }
+
+  function cancelEditContact() {
+    setEditingBookingId(null)
+  }
+
+  async function handleSaveContact(booking: TeeTimeBookingRow) {
+    setActionBookingId(booking.id)
+    setModalError(null)
+
+    const result = await updateBookingContact(booking.id, {
+      phone: editContact.phone,
+      email: editContact.email,
+    })
+
+    setActionBookingId(null)
+
+    if (result.error) {
+      setModalError(result.error.message)
+      return
+    }
+
+    setBookings((prev) =>
+      prev.map((b) =>
+        b.id === booking.id
+          ? { ...b, phone: result.data.phone, email: result.data.email }
+          : b,
+      ),
+    )
+    setEditingBookingId(null)
   }
 
   async function handleCancelBooking(booking: TeeTimeBookingRow) {
@@ -656,6 +699,7 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
               {viewingBookings.map((booking) => {
                 const isPaid = booking.payment_status === 'paid'
                 const isChanging = changingBookingId === booking.id
+                const isEditing = editingBookingId === booking.id
                 const isActing = actionBookingId === booking.id
                 const changeOptions = moveOptions.filter(
                   (o) =>
@@ -708,7 +752,58 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                         </button>
                       </div>
                     </div>
-                    {isChanging ? (
+                    {isEditing ? (
+                      <div className="reservation__change">
+                        <label className="field">
+                          <span>Phone</span>
+                          <input
+                            className="inline-input"
+                            type="tel"
+                            value={editContact.phone}
+                            onChange={(e) =>
+                              setEditContact({
+                                ...editContact,
+                                phone: e.target.value,
+                              })
+                            }
+                            placeholder="555-123-4567"
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Email (optional)</span>
+                          <input
+                            className="inline-input"
+                            type="email"
+                            value={editContact.email}
+                            onChange={(e) =>
+                              setEditContact({
+                                ...editContact,
+                                email: e.target.value,
+                              })
+                            }
+                            placeholder="joe@example.com"
+                          />
+                        </label>
+                        <div className="reservation__actions">
+                          <button
+                            type="button"
+                            className="btn btn--sm btn--primary"
+                            disabled={isActing}
+                            onClick={() => void handleSaveContact(booking)}
+                          >
+                            {isActing ? 'Saving…' : 'Save'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn--sm btn--ghost"
+                            disabled={isActing}
+                            onClick={cancelEditContact}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : isChanging ? (
                       <div className="reservation__change">
                         <select
                           className="inline-input"
@@ -748,6 +843,14 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                       </div>
                     ) : (
                       <div className="reservation__actions">
+                        <button
+                          type="button"
+                          className="btn btn--sm btn--ghost"
+                          disabled={isActing}
+                          onClick={() => startEditContact(booking)}
+                        >
+                          Edit
+                        </button>
                         <button
                           type="button"
                           className="btn btn--sm btn--ghost"

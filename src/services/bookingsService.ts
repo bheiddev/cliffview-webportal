@@ -272,3 +272,55 @@ export async function moveTeeTimeBooking(
     return { data: null, error: new Error(message) }
   }
 }
+
+export type UpdateBookingContactResult =
+  | { data: { phone: string; email: string | null }; error: null }
+  | { data: null; error: Error }
+
+export async function updateBookingContact(
+  bookingId: string,
+  input: { phone: string; email?: string },
+): Promise<UpdateBookingContactResult> {
+  const phone = input.phone.trim()
+  const email = input.email?.trim() ?? ''
+
+  if (!phone) {
+    return { data: null, error: new Error('Phone number is required.') }
+  }
+  if (email && !EMAIL_PATTERN.test(email)) {
+    return { data: null, error: new Error('Email address is invalid.') }
+  }
+
+  try {
+    const supabase = getSupabaseClient()
+    const { data, error } = await supabase.rpc('update_booking_contact', {
+      p_booking_id: bookingId,
+      p_phone: phone,
+      p_email: email || null,
+    })
+
+    if (error) {
+      return { data: null, error: new Error(error.message) }
+    }
+
+    const body = data as {
+      phone?: string
+      email?: string | null
+    } | null
+
+    if (!body?.phone) {
+      return {
+        data: null,
+        error: new Error('Update succeeded but the response was incomplete.'),
+      }
+    }
+
+    return {
+      data: { phone: body.phone, email: body.email ?? null },
+      error: null,
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    return { data: null, error: new Error(message) }
+  }
+}

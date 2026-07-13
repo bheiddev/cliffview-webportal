@@ -178,6 +178,18 @@ export type Database = {
           new_spots_remaining: number
         }
       }
+      update_booking_contact: {
+        Args: {
+          p_booking_id: string
+          p_phone: string
+          p_email?: string | null
+        }
+        Returns: {
+          booking_id: string
+          phone: string
+          email: string | null
+        }
+      }
     }
   }
 }
