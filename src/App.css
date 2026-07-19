@@ -195,6 +195,12 @@
   color: var(--text);
 }
 
+.portal-badge--unpaid {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
 .portal-badge--muted {
   text-transform: none;
   font-size: 11px;

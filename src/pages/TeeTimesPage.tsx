@@ -671,9 +671,6 @@ export function TeeTimesPage() {
                     {!row.is_available ? (
                       <span className="portal-badge portal-badge--closed">closed</span>
                     ) : null}
-                    {row.spots_remaining === 0 ? (
-                      <span className="portal-badge portal-badge--closed">full</span>
-                    ) : null}
                   </div>
                   {row.description ? (
                     <p className="tee-time-card__desc">{row.description}</p>
@@ -697,7 +694,7 @@ export function TeeTimesPage() {
                               className={`portal-badge ${
                                 isPaid
                                   ? 'portal-badge--open'
-                                  : 'portal-badge--closed'
+                                  : 'portal-badge--unpaid'
                               }`}
                             >
                               {isPaid ? 'Paid' : 'Unpaid'}
@@ -811,7 +808,7 @@ export function TeeTimesPage() {
                           className={`portal-badge ${
                             isPaid
                               ? 'portal-badge--open'
-                              : 'portal-badge--closed'
+                              : 'portal-badge--unpaid'
                           }`}
                         >
                           {isPaid ? 'Paid' : 'Unpaid'}
