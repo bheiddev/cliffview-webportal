@@ -6,27 +6,26 @@ import './App.css'
 
 type Page = 'home' | 'tournaments' | 'tee-times'
 
-const subtitles: Record<Page, string> = {
-  home: 'Admin portal',
-  tournaments: 'Tournaments',
-  'tee-times': 'Tee times',
-}
-
 function App() {
   const [page, setPage] = useState<Page>('home')
 
   return (
     <div className="portal">
       <header className="portal-header">
+        {page !== 'home' ? (
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={() => setPage('home')}
+          >
+            ← Home
+          </button>
+        ) : null}
         <img
           className="portal-logo"
           src="/CliffViewLogo.webp"
           alt="Cliffview logo"
         />
-        <div className="portal-header__text">
-          <h1 className="portal-title">Cliffview</h1>
-          <p className="portal-subtitle">{subtitles[page]}</p>
-        </div>
       </header>
 
       <main className="portal-main">
@@ -36,12 +35,8 @@ function App() {
             onTeeTimes={() => setPage('tee-times')}
           />
         ) : null}
-        {page === 'tournaments' ? (
-          <TournamentsPage onBack={() => setPage('home')} />
-        ) : null}
-        {page === 'tee-times' ? (
-          <TeeTimesPage onBack={() => setPage('home')} />
-        ) : null}
+        {page === 'tournaments' ? <TournamentsPage /> : null}
+        {page === 'tee-times' ? <TeeTimesPage /> : null}
       </main>
     </div>
   )

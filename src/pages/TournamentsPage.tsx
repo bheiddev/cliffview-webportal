@@ -10,10 +10,6 @@ import {
 } from '../utils/datetime.ts'
 import { formatDate, formatTime, money } from '../utils/format.ts'
 
-type TournamentsPageProps = {
-  onBack: () => void
-}
-
 const defaultForm = (): TournamentInsert => ({
   name: '',
   date: '',
@@ -28,7 +24,7 @@ const defaultForm = (): TournamentInsert => ({
   is_visible: true,
 })
 
-export function TournamentsPage({ onBack }: TournamentsPageProps) {
+export function TournamentsPage() {
   const [tournaments, setTournaments] = useState<TournamentRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -93,10 +89,7 @@ export function TournamentsPage({ onBack }: TournamentsPageProps) {
 
   return (
     <>
-      <div className="page-toolbar">
-        <button type="button" className="btn btn--ghost" onClick={onBack}>
-          ← Home
-        </button>
+      <div className="page-toolbar page-toolbar--end">
         <button
           type="button"
           className="btn btn--primary"

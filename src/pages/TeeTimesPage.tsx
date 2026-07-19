@@ -27,10 +27,6 @@ import {
 } from '../utils/datetime.ts'
 import { formatDate, formatTime } from '../utils/format.ts'
 
-type TeeTimesPageProps = {
-  onBack: () => void
-}
-
 type BookDraft = {
   guestName: string
   phone: string
@@ -45,7 +41,7 @@ const defaultBookForm = (maxGolfers = 1): BookDraft => ({
   golfers: Math.max(1, maxGolfers > 0 ? 1 : 0),
 })
 
-export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
+export function TeeTimesPage() {
   const today = localDateString()
   const [teeTimes, setTeeTimes] = useState<TeeTimeRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -91,6 +87,31 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
     }
     return map
   }, [bookings])
+
+  const statusCountsByDate = useMemo(() => {
+    const map = new Map<
+      string,
+      { available: number; partial: number; full: number }
+    >()
+    for (const row of teeTimes) {
+      const counts = map.get(row.date) ?? { available: 0, partial: 0, full: 0 }
+      if (row.spots_remaining <= 0) {
+        counts.full += 1
+      } else if (row.spots_remaining < row.spots_total) {
+        counts.partial += 1
+      } else {
+        counts.available += 1
+      }
+      map.set(row.date, counts)
+    }
+    return map
+  }, [teeTimes])
+
+  const selectedCounts = statusCountsByDate.get(selectedDate) ?? {
+    available: 0,
+    partial: 0,
+    full: 0,
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -383,16 +404,30 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
 
   return (
     <>
-      <div className="page-toolbar">
-        <button type="button" className="btn btn--ghost" onClick={onBack}>
-          ← Home
-        </button>
-      </div>
-
       <section className="portal-panel" aria-labelledby="tee-times-heading">
         <div className="portal-panel-head">
           <h2 id="tee-times-heading">Tee times</h2>
-          <span className="portal-count">{dayTeeTimes.length}</span>
+          <div className="portal-panel-head__right">
+            <span className="portal-count portal-count--partial">
+              {selectedCounts.partial} partial
+            </span>
+            <span className="portal-count portal-count--full">
+              {selectedCounts.full} full
+            </span>
+            <input
+              type="date"
+              className="inline-input portal-date-picker"
+              aria-label="Jump to date"
+              min={today}
+              value={selectedDate}
+              onChange={(e) => {
+                const date = e.target.value
+                if (!date) return
+                setSelectedDate(date)
+                setWindowStart(date)
+              }}
+            />
+          </div>
         </div>
 
         <div className="day-tabs" role="tablist" aria-label="Tee time dates">
@@ -409,6 +444,7 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
             {tabDates.map((date) => {
               const label = formatDayTabLabel(date, today)
               const isSelected = date === selectedDate
+              const counts = statusCountsByDate.get(date)
 
               return (
                 <button
@@ -421,6 +457,34 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                 >
                   <span className="day-tab__primary">{label.primary}</span>
                   <span className="day-tab__secondary">{label.secondary}</span>
+                  {counts ? (
+                    <span className="day-tab__counts">
+                      {counts.available > 0 ? (
+                        <span
+                          className="day-tab__count day-tab__count--available"
+                          title={`${counts.available} available`}
+                        >
+                          {counts.available}
+                        </span>
+                      ) : null}
+                      {counts.partial > 0 ? (
+                        <span
+                          className="day-tab__count day-tab__count--partial"
+                          title={`${counts.partial} partially booked`}
+                        >
+                          {counts.partial}
+                        </span>
+                      ) : null}
+                      {counts.full > 0 ? (
+                        <span
+                          className="day-tab__count day-tab__count--full"
+                          title={`${counts.full} fully booked`}
+                        >
+                          {counts.full}
+                        </span>
+                      ) : null}
+                    </span>
+                  ) : null}
                 </button>
               )
             })}
@@ -435,7 +499,23 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
           </button>
         </div>
 
-        <p className="day-tabs__summary">{formatDate(selectedDate)}</p>
+        <div className="day-tabs__summary">
+          <span>{formatDate(selectedDate)}</span>
+          <span className="day-legend">
+            <span className="day-legend__item">
+              <span className="day-legend__dot day-legend__dot--available" />
+              Available
+            </span>
+            <span className="day-legend__item">
+              <span className="day-legend__dot day-legend__dot--partial" />
+              Partially booked
+            </span>
+            <span className="day-legend__item">
+              <span className="day-legend__dot day-legend__dot--full" />
+              Fully booked
+            </span>
+          </span>
+        </div>
 
         {error ? (
           <p className="portal-error" role="alert">
@@ -583,16 +663,14 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                 >
                   <div className="tee-time-card__head">
                     <h3 className="tee-time-card__time">{formatTime(row.time)}</h3>
+                    <span className="tee-time-card__spots">
+                      {row.spots_remaining}/{row.spots_total} spots
+                    </span>
                   </div>
-                  <p className="tee-time-card__spots">
-                    {row.spots_remaining}/{row.spots_total} spots
-                  </p>
                   <div className="tee-time-card__meta">
-                    {row.is_available ? (
-                      <span className="portal-badge portal-badge--open">open</span>
-                    ) : (
+                    {!row.is_available ? (
                       <span className="portal-badge portal-badge--closed">closed</span>
-                    )}
+                    ) : null}
                     {row.spots_remaining === 0 ? (
                       <span className="portal-badge portal-badge--closed">full</span>
                     ) : null}
@@ -857,7 +935,7 @@ export function TeeTimesPage({ onBack }: TeeTimesPageProps) {
                           disabled={isActing}
                           onClick={() => startChange(booking.id)}
                         >
-                          Change
+                          Change Tee Time
                         </button>
                         <button
                           type="button"
