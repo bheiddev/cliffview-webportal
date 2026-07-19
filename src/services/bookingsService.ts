@@ -274,29 +274,54 @@ export async function moveTeeTimeBooking(
 }
 
 export type UpdateBookingContactResult =
-  | { data: { phone: string; email: string | null }; error: null }
+  | {
+      data: {
+        guestName: string
+        phone: string
+        email: string | null
+        golfers: number
+        teeTimeId: string
+        spotsRemaining: number
+      }
+      error: null
+    }
   | { data: null; error: Error }
 
 export async function updateBookingContact(
   bookingId: string,
-  input: { phone: string; email?: string },
+  input: {
+    guestName: string
+    phone: string
+    email?: string
+    golfers: number
+  },
 ): Promise<UpdateBookingContactResult> {
+  const guestName = input.guestName.trim()
   const phone = input.phone.trim()
   const email = input.email?.trim() ?? ''
+  const golfers = Math.trunc(input.golfers)
 
+  if (!guestName) {
+    return { data: null, error: new Error('Guest name is required.') }
+  }
   if (!phone) {
     return { data: null, error: new Error('Phone number is required.') }
   }
   if (email && !EMAIL_PATTERN.test(email)) {
     return { data: null, error: new Error('Email address is invalid.') }
   }
+  if (!Number.isFinite(golfers) || golfers < 1) {
+    return { data: null, error: new Error('Number of golfers must be at least 1.') }
+  }
 
   try {
     const supabase = getSupabaseClient()
     const { data, error } = await supabase.rpc('update_booking_contact', {
       p_booking_id: bookingId,
+      p_guest_name: guestName,
       p_phone: phone,
       p_email: email || null,
+      p_golfers: golfers,
     })
 
     if (error) {
@@ -304,11 +329,21 @@ export async function updateBookingContact(
     }
 
     const body = data as {
+      guest_name?: string
       phone?: string
       email?: string | null
+      golfers?: number
+      tee_time_id?: string
+      spots_remaining?: number
     } | null
 
-    if (!body?.phone) {
+    if (
+      !body?.guest_name ||
+      !body.phone ||
+      typeof body.golfers !== 'number' ||
+      !body.tee_time_id ||
+      typeof body.spots_remaining !== 'number'
+    ) {
       return {
         data: null,
         error: new Error('Update succeeded but the response was incomplete.'),
@@ -316,7 +351,14 @@ export async function updateBookingContact(
     }
 
     return {
-      data: { phone: body.phone, email: body.email ?? null },
+      data: {
+        guestName: body.guest_name,
+        phone: body.phone,
+        email: body.email ?? null,
+        golfers: body.golfers,
+        teeTimeId: body.tee_time_id,
+        spotsRemaining: body.spots_remaining,
+      },
       error: null,
     }
   } catch (e) {

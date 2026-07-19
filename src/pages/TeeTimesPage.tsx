@@ -61,7 +61,12 @@ export function TeeTimesPage() {
   const [actionBookingId, setActionBookingId] = useState<string | null>(null)
   const [modalError, setModalError] = useState<string | null>(null)
   const [editingBookingId, setEditingBookingId] = useState<string | null>(null)
-  const [editContact, setEditContact] = useState({ phone: '', email: '' })
+  const [editContact, setEditContact] = useState({
+    guestName: '',
+    phone: '',
+    email: '',
+    golfers: 1,
+  })
   const [selectedDate, setSelectedDate] = useState(today)
   const [windowStart, setWindowStart] = useState(today)
   const [hasAlignedInitialDate, setHasAlignedInitialDate] = useState(false)
@@ -225,7 +230,12 @@ export function TeeTimesPage() {
 
   function startEditContact(booking: TeeTimeBookingRow) {
     setEditingBookingId(booking.id)
-    setEditContact({ phone: booking.phone ?? '', email: booking.email ?? '' })
+    setEditContact({
+      guestName: booking.guest_name,
+      phone: booking.phone ?? '',
+      email: booking.email ?? '',
+      golfers: booking.golfers,
+    })
     setChangingBookingId(null)
     setModalError(null)
   }
@@ -239,8 +249,10 @@ export function TeeTimesPage() {
     setModalError(null)
 
     const result = await updateBookingContact(booking.id, {
+      guestName: editContact.guestName,
       phone: editContact.phone,
       email: editContact.email,
+      golfers: editContact.golfers,
     })
 
     setActionBookingId(null)
@@ -250,10 +262,23 @@ export function TeeTimesPage() {
       return
     }
 
+    setTeeTimes((prev) =>
+      prev.map((r) =>
+        r.id === result.data.teeTimeId
+          ? { ...r, spots_remaining: result.data.spotsRemaining }
+          : r,
+      ),
+    )
     setBookings((prev) =>
       prev.map((b) =>
         b.id === booking.id
-          ? { ...b, phone: result.data.phone, email: result.data.email }
+          ? {
+              ...b,
+              guest_name: result.data.guestName,
+              phone: result.data.phone,
+              email: result.data.email,
+              golfers: result.data.golfers,
+            }
           : b,
       ),
     )
@@ -830,6 +855,21 @@ export function TeeTimesPage() {
                     {isEditing ? (
                       <div className="reservation__change">
                         <label className="field">
+                          <span>Name</span>
+                          <input
+                            className="inline-input"
+                            type="text"
+                            value={editContact.guestName}
+                            onChange={(e) =>
+                              setEditContact({
+                                ...editContact,
+                                guestName: e.target.value,
+                              })
+                            }
+                            placeholder="Guest name"
+                          />
+                        </label>
+                        <label className="field">
                           <span>Phone</span>
                           <input
                             className="inline-input"
@@ -857,6 +897,25 @@ export function TeeTimesPage() {
                               })
                             }
                             placeholder="joe@example.com"
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Golfers</span>
+                          <input
+                            className="inline-input"
+                            type="number"
+                            min={1}
+                            max={
+                              booking.golfers +
+                              (viewingRow?.spots_remaining ?? 0)
+                            }
+                            value={editContact.golfers}
+                            onChange={(e) =>
+                              setEditContact({
+                                ...editContact,
+                                golfers: Number(e.target.value),
+                              })
+                            }
                           />
                         </label>
                         <div className="reservation__actions">

@@ -790,7 +790,6 @@
   flex-direction: column;
   gap: 8px;
   padding-top: 8px;
-  border-top: 1px dashed var(--border);
 }
 
 .reservation__change .inline-input {

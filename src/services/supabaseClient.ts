@@ -181,13 +181,19 @@ export type Database = {
       update_booking_contact: {
         Args: {
           p_booking_id: string
+          p_guest_name: string
           p_phone: string
           p_email?: string | null
+          p_golfers: number
         }
         Returns: {
           booking_id: string
+          guest_name: string
           phone: string
           email: string | null
+          golfers: number
+          tee_time_id: string
+          spots_remaining: number
         }
       }
     }
